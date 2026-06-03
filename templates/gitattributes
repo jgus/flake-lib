@@ -1,0 +1,10 @@
+# Per-branch ownership: when the orchestrator merges main into an existing exact
+# branch (to pick up orchestrator/workflow improvements), these files stay as-is on
+# the branch. The `ours` merge driver is configured at runtime by update-branches
+# (`git config merge.ours.driver true`).
+#
+# flake.nix is branch-owned only when update-version rewrites it (sibling cascades);
+# drop that line for leaves with no siblings.
+pin.nix     merge=ours
+flake.lock  merge=ours
+flake.nix   merge=ours

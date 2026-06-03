@@ -1,0 +1,34 @@
+name: Update branches
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+env:
+  # Set to the lowest upstream version this repo should track.
+  MINIMUM_TRACKING_VERSION: "0.0.0"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Orchestrate per-version branches
+        env:
+          # gh CLI reads GH_TOKEN, not GITHUB_TOKEN; required for github-source flakes.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nix run .#update-branches
