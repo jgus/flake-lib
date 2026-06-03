@@ -33,8 +33,6 @@ requested="${1:-}"
 pin_changed=0
 new_version=""
 
-echo "[flake-lib v1.0.1] update-version (${SOURCE_TYPE})"
-
 fetch_repo_file() {
   # $1 = path in repo, $2 = rev. Echoes file contents on stdout.
   local path="$1" rev="$2" proj enc
