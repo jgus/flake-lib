@@ -29,9 +29,15 @@
           extraHashes = [ "npmDepsHash" ];
         };
         revalidate-hash = lib.mkRevalidateHash { inherit pkgs; buildAttr = "example"; };
+        # github commit-tracking (default-branch HEAD -> 0-unstable-DATE), as searxng-mcp uses.
+        update-version-github-commit = lib.mkUpdateVersion {
+          inherit pkgs;
+          source = { type = "github"; owner = "example"; repo = "example"; track = "commit"; };
+          buildAttr = "example";
+        };
       in
       {
-        packages = { inherit update-version update-branches update-version-github revalidate-hash; };
-        checks = { inherit update-version update-branches update-version-github revalidate-hash; };
+        packages = { inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash; };
+        checks = { inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash; };
       });
 }

@@ -5,6 +5,8 @@
 #   PYPI_NAME     PyPI distribution name (underscore form)   [pypi]
 #   PYPI_FORMAT   sdist | wheel                              [pypi]
 #   GH_OWNER/GH_REPO          GitHub owner/repo              [github]
+#   GH_TRACK                  release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)  [github]
+#   GH_BRANCH                 commit-tracking: branch to follow (default: repo default branch)  [github]
 #   GITLAB_OWNER/GITLAB_REPO  GitLab owner/repo              [gitlab]
 #   BUILD_ATTR    flake package attr to build-verify
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
@@ -40,6 +42,8 @@ ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored
 SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
 SIBLINGS="${SIBLINGS:-[]}"
 CASCADE_PY="${CASCADE_PY:-}"
+GH_TRACK="${GH_TRACK:-release}"        # github: release (tags) | commit (default-branch HEAD)
+GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follow
 
 declare -A extra=()
 
@@ -174,23 +178,35 @@ EOF
     ;;
 
   github)
-    if [[ -n "${requested}" ]]; then
-      new_version="${requested#[Vv]}"
-    else
-      echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
-      new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
-      new_version="${new_version#[Vv]}"
-    fi
-    new_rev=""
-    for candidate in "v${new_version}" "V${new_version}" "${new_version}"; do
-      if sha=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null); then
-        new_rev="${sha}"
-        break
+    if [[ "${GH_TRACK}" == "commit" ]]; then
+      if [[ -n "${requested}" ]]; then
+        commit=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${requested}")
+      else
+        branch="${GH_BRANCH:-$(gh api "/repos/${GH_OWNER}/${GH_REPO}" --jq '.default_branch')}"
+        echo "Querying GitHub for latest commit on ${GH_OWNER}/${GH_REPO}@${branch}..."
+        commit=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${branch}")
       fi
-    done
-    if [[ -z "${new_rev}" ]]; then
-      echo "error: could not resolve v${new_version} / V${new_version} / ${new_version} on ${GH_OWNER}/${GH_REPO}" >&2
-      exit 1
+      new_rev=$(jq -r '.sha' <<<"${commit}")
+      new_version="0-unstable-$(jq -r '.commit.committer.date' <<<"${commit}" | cut -d'T' -f1)"
+    else
+      if [[ -n "${requested}" ]]; then
+        new_version="${requested#[Vv]}"
+      else
+        echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
+        new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
+        new_version="${new_version#[Vv]}"
+      fi
+      new_rev=""
+      for candidate in "v${new_version}" "V${new_version}" "${new_version}"; do
+        if sha=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null); then
+          new_rev="${sha}"
+          break
+        fi
+      done
+      if [[ -z "${new_rev}" ]]; then
+        echo "error: could not resolve v${new_version} / V${new_version} / ${new_version} on ${GH_OWNER}/${GH_REPO}" >&2
+        exit 1
+      fi
     fi
     run_artifact_hook "${new_rev}" "${new_version}"
     if [[ "${HASH_MODE}" == "build-failure" ]]; then

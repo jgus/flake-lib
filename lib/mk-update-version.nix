@@ -24,6 +24,8 @@ pkgs.writeShellApplication {
     PYPI_FORMAT = source.format or "sdist";
     GH_OWNER = source.owner or "";
     GH_REPO = source.repo or "";
+    GH_TRACK = source.track or "release"; # release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)
+    GH_BRANCH = source.branch or ""; # commit-tracking: branch to follow (default: repo's default branch)
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
     BUILD_ATTR = buildAttr;
