@@ -33,6 +33,16 @@ requested="${1:-}"
 pin_changed=0
 new_version=""
 
+# Optional seams (defaulted so simple pypi leaves need not set them):
+HASH_MODE="${HASH_MODE:-prefetch}"        # prefetch | build-failure (source/vendor hash)
+EXTRA_HASHES="${EXTRA_HASHES:-[]}"        # JSON array of extra pin field names (e.g. ["npmDepsHash"])
+ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored files, emit name=value extra hashes
+SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
+SIBLINGS="${SIBLINGS:-[]}"
+CASCADE_PY="${CASCADE_PY:-}"
+
+declare -A extra=()
+
 fetch_repo_file() {
   # $1 = path in repo, $2 = rev. Echoes file contents on stdout.
   local path="$1" rev="$2" proj enc
@@ -76,6 +86,56 @@ resolve_and_rewrite_siblings() {
     echo "  ${reqName} ${spec} -> github:${flakeRepo}/${ref}"
     sed -i -E "s|(url = \"github:${flakeRepo})(/[^\"]*)?(\")|\\1/${ref}\\3|" "${flake}"
   done
+}
+
+write_source_pin() {
+  # $1 version, $2 sourceRev, $3 sourceHash. Appends EXTRA_HASHES fields from `extra`.
+  local v="$1" rev="$2" h="$3" name
+  {
+    echo "# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump."
+    echo "{"
+    echo "  version = \"${v}\";"
+    echo "  sourceRev = \"${rev}\";"
+    echo "  sourceHash = \"${h}\";"
+    for name in $(jq -r '.[]' <<<"${EXTRA_HASHES}"); do
+      echo "  ${name} = \"${extra[${name}]:-}\";"
+    done
+    echo "}"
+  } > "${pin}"
+}
+
+run_artifact_hook() {
+  # $1 rev, $2 version. Runs the consumer hook (which regenerates vendored files in
+  # FLAKE_ROOT) and captures its `name=value` stdout lines into `extra`.
+  local rev="$1" v="$2" hook_out k val
+  [[ -z "${ARTIFACT_HOOK}" ]] && return 0
+  echo "Running artifact hook..."
+  hook_out=$(NEW_REV="${rev}" NEW_VERSION="${v}" FLAKE_ROOT="${FLAKE_ROOT}" \
+    GH_OWNER="${GH_OWNER}" GH_REPO="${GH_REPO}" \
+    GITLAB_OWNER="${GITLAB_OWNER}" GITLAB_REPO="${GITLAB_REPO}" "${ARTIFACT_HOOK}")
+  while IFS='=' read -r k val; do
+    [[ -n "${k}" ]] && extra["${k}"]="${val}"
+  done <<<"${hook_out}"
+}
+
+revalidate_hash() {
+  # $1 = pin field. Build; on a fixed-output hash mismatch, rewrite the field from
+  # nix's "got:" and rebuild. For vendor hashes that can't be prefetched.
+  local field="$1" out rc new
+  echo "Validating ${field} via build..."
+  set +e
+  out=$(nix build --option post-build-hook "" "${FLAKE_ROOT}#${BUILD_ATTR}" --no-link 2>&1)
+  rc=$?
+  set -e
+  (( rc == 0 )) && return 0
+  new=$(printf '%s\n' "${out}" | sed -nE 's/.*got:[[:space:]]+(sha256-[A-Za-z0-9+/=]+).*/\1/p' | head -1)
+  if [[ -z "${new}" ]]; then
+    echo "error: build of ${BUILD_ATTR} failed and it wasn't a hash mismatch:" >&2
+    printf '%s\n' "${out}" >&2
+    exit 1
+  fi
+  echo "  ${field} drift -> ${new}"
+  sed -i -E "s|^([[:space:]]*${field}[[:space:]]*=[[:space:]]*\")[^\"]*(\";)|\\1${new}\\2|" "${pin}"
 }
 
 case "${SOURCE_TYPE}" in
@@ -132,23 +192,17 @@ EOF
       echo "error: could not resolve v${new_version} / V${new_version} / ${new_version} on ${GH_OWNER}/${GH_REPO}" >&2
       exit 1
     fi
-    cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
-    cur_rev=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
-    cur_hash=$(nix eval --raw --file "${pin}" sourceHash 2>/dev/null || echo "")
-    echo "Computing source hash for ${GH_OWNER}/${GH_REPO}@${new_rev}..."
-    new_hash=$(nix-prefetch-github --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
-    if [[ "${cur_version}" != "${new_version}" || "${cur_rev}" != "${new_rev}" || "${cur_hash}" != "${new_hash}" ]]; then
-      pin_changed=1
-      echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
-      cat > "${pin}" <<EOF
-# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
-{
-  version = "${new_version}";
-  sourceRev = "${new_rev}";
-  sourceHash = "${new_hash}";
-}
-EOF
+    run_artifact_hook "${new_rev}" "${new_version}"
+    if [[ "${HASH_MODE}" == "build-failure" ]]; then
+      new_hash=""
+    else
+      echo "Computing source hash for ${GH_OWNER}/${GH_REPO}@${new_rev}..."
+      new_hash=$(nix-prefetch-github --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
     fi
+    echo "Writing pin.nix (-> ${new_version})..."
+    write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
+    pin_changed=1
+    [[ "${HASH_MODE}" == "build-failure" ]] && revalidate_hash sourceHash
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_siblings "${new_rev}"
@@ -166,23 +220,17 @@ EOF
     new_rev=$(jq -r '.id' <<<"${commit}")
     new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)
     new_version="0-unstable-${new_date}"
-    cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
-    cur_rev=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
-    cur_hash=$(nix eval --raw --file "${pin}" sourceHash 2>/dev/null || echo "")
-    echo "Computing source hash for ${GITLAB_OWNER}/${GITLAB_REPO}@${new_rev}..."
-    new_hash=$(nix-prefetch-git --quiet --url "https://gitlab.com/${GITLAB_OWNER}/${GITLAB_REPO}.git" --rev "${new_rev}" | jq -r '.hash')
-    if [[ "${cur_version}" != "${new_version}" || "${cur_rev}" != "${new_rev}" || "${cur_hash}" != "${new_hash}" ]]; then
-      pin_changed=1
-      echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
-      cat > "${pin}" <<EOF
-# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
-{
-  version = "${new_version}";
-  sourceRev = "${new_rev}";
-  sourceHash = "${new_hash}";
-}
-EOF
+    run_artifact_hook "${new_rev}" "${new_version}"
+    if [[ "${HASH_MODE}" == "build-failure" ]]; then
+      new_hash=""
+    else
+      echo "Computing source hash for ${GITLAB_OWNER}/${GITLAB_REPO}@${new_rev}..."
+      new_hash=$(nix-prefetch-git --quiet --url "https://gitlab.com/${GITLAB_OWNER}/${GITLAB_REPO}.git" --rev "${new_rev}" | jq -r '.hash')
     fi
+    echo "Writing pin.nix (-> ${new_version})..."
+    write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
+    pin_changed=1
+    [[ "${HASH_MODE}" == "build-failure" ]] && revalidate_hash sourceHash
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_siblings "${new_rev}"
@@ -195,8 +243,12 @@ EOF
     ;;
 esac
 
-echo "Verifying build (${BUILD_ATTR})..."
-nix build --option post-build-hook "" "${FLAKE_ROOT}#${BUILD_ATTR}" --no-link
+if [[ -n "${SKIP_BUILD}" ]]; then
+  echo "SKIP_BUILD set; skipping build verification of ${BUILD_ATTR}."
+else
+  echo "Verifying build (${BUILD_ATTR})..."
+  nix build --option post-build-hook "" "${FLAKE_ROOT}#${BUILD_ATTR}" --no-link
+fi
 
 echo
 if (( pin_changed )); then

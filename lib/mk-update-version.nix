@@ -1,10 +1,22 @@
-# Generates the `update-version` package. The actual logic lives in
-# ../scripts/update-version.sh; this only injects the per-flake spec as env vars.
-# python3+packaging is added only when sibling cascades are configured (the
-# cascade resolver needs it, and it can't be expressed as a nix-shell shebang).
-{ pkgs, source, buildAttr, siblings ? [ ] }:
+# Generates the `update-version` package. The logic lives in ../scripts/update-version.sh;
+# this only injects the per-flake spec as env vars.
+#   hashMode     : "prefetch" (default) or "build-failure" (vendor hashes that can't be prefetched)
+#   extraHashes  : extra pin field names whose values the artifactHook emits (e.g. [ "npmDepsHash" ])
+#   artifactHook : consumer script (path) that regenerates vendored files + prints name=value extra hashes
+#   siblings     : sibling-cascade specs (needs python3+packaging, added below)
+{ pkgs
+, source
+, buildAttr
+, siblings ? [ ]
+, hashMode ? "prefetch"
+, extraHashes ? [ ]
+, artifactHook ? null
+}:
 pkgs.writeShellApplication {
   name = "update-version";
+  # EXTRA_HASHES / SIBLINGS are JSON strings (quotes/brackets) consumed via jq at
+  # runtime; writeShellApplication's generated export trips SC2089/SC2090 (false positive).
+  excludeShellChecks = [ "SC2089" "SC2090" ];
   runtimeInputs = pkgs.lib.optional (siblings != [ ]) (pkgs.python3.withPackages (p: [ p.packaging ]));
   runtimeEnv = {
     SOURCE_TYPE = source.type;
@@ -15,6 +27,9 @@ pkgs.writeShellApplication {
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
     BUILD_ATTR = buildAttr;
+    HASH_MODE = hashMode;
+    EXTRA_HASHES = builtins.toJSON extraHashes;
+    ARTIFACT_HOOK = if artifactHook == null then "" else "${artifactHook}";
     SIBLINGS = builtins.toJSON siblings;
     CASCADE_PY = "${../scripts/cascade.py}";
   };
