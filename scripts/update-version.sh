@@ -142,6 +142,24 @@ revalidate_hash() {
   sed -i -E "s|^([[:space:]]*${field}[[:space:]]*=[[:space:]]*\")[^\"]*(\";)|\\1${new}\\2|" "${pin}"
 }
 
+source_pin_current() {
+  # $1 version, $2 rev. True (0) when pin.nix already matches at this version+rev with sourceHash
+  # and every EXTRA_HASHES field populated. Lets a no-op run skip the artifactHook + cascade
+  # regeneration (which can be non-deterministic, e.g. npm lockfiles) instead of churning the
+  # pin on every run. A placeholder pin (empty hash) returns false, so the populate path still
+  # runs; callers skip this in build-failure mode, where the hash can drift without a rev change.
+  local v="$1" rev="$2" cv crev csh name val
+  cv=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
+  crev=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
+  csh=$(nix eval --raw --file "${pin}" sourceHash 2>/dev/null || echo "")
+  [[ "${cv}" == "${v}" && "${crev}" == "${rev}" && -n "${csh}" ]] || return 1
+  for name in $(jq -r '.[]' <<<"${EXTRA_HASHES}"); do
+    val=$(nix eval --raw --file "${pin}" "${name}" 2>/dev/null || echo "")
+    [[ -n "${val}" ]] || return 1
+  done
+  return 0
+}
+
 case "${SOURCE_TYPE}" in
   pypi)
     if [[ -n "${requested}" ]]; then
@@ -208,6 +226,10 @@ EOF
         exit 1
       fi
     fi
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+      echo "Already up to date (${new_version})."
+      exit 0
+    fi
     run_artifact_hook "${new_rev}" "${new_version}"
     if [[ "${HASH_MODE}" == "build-failure" ]]; then
       new_hash=""
@@ -236,6 +258,10 @@ EOF
     new_rev=$(jq -r '.id' <<<"${commit}")
     new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)
     new_version="0-unstable-${new_date}"
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+      echo "Already up to date (${new_version})."
+      exit 0
+    fi
     run_artifact_hook "${new_rev}" "${new_version}"
     if [[ "${HASH_MODE}" == "build-failure" ]]; then
       new_hash=""
