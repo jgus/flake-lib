@@ -1,6 +1,6 @@
 # Generates the `update-branches` orchestrator package. The logic lives in
 # ../scripts/update-branches-core.sh; this injects the per-flake spec as env vars.
-#   pinSchema        : pypi | github | github-npm | github-yarn (placeholder pin shape)
+#   pinSchema        : pypi | github | github-npm | github-yarn | version-only (placeholder pin shape)
 #   branchOwnedFiles : files update-version mutates (diffed, added, committed per branch)
 { pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ] }:
 pkgs.writeShellApplication {

@@ -25,7 +25,7 @@
 #   SOURCE_TYPE          pypi | github  (gitlab leaves are single-branch, no orchestrator)
 #   PYPI_NAME            [pypi]
 #   GH_OWNER/GH_REPO     [github]
-#   PIN_SCHEMA           pypi | github | github-npm | github-yarn
+#   PIN_SCHEMA           pypi | github | github-npm | github-yarn | version-only
 #   BRANCH_OWNED_FILES   space-separated files update-version mutates per branch
 
 set -euo pipefail
@@ -93,6 +93,17 @@ EOF
   sourceRev = "";
   sourceHash = "";
   yarnHash = "";
+}
+EOF
+      ;;
+    version-only)
+      # For flakes whose update-version rewrites the whole pin with a non-standard shape
+      # (e.g. a keyed table of per-artifact hashes). The placeholder carries only the version;
+      # update-version replaces the file entirely before any build.
+      cat > pin.nix <<EOF
+# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
+{
+  version = "${v}";
 }
 EOF
       ;;
