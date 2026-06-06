@@ -21,7 +21,8 @@ let
   npmFetcherEnv = lib.optionalString (manager == "npm" && fetcherVersion != null)
     "export NPM_FETCHER_VERSION=${toString fetcherVersion}";
 
-  ghFetch = file: ''gh api "/repos/''${GH_OWNER}/''${GH_REPO}/contents/${file}?ref=''${NEW_REV}" --jq '.content' | base64 -d'';
+  # raw media type, not the JSON `.content` field: the latter is base64 and capped at 1 MB by the Contents API (large lockfiles come back empty). raw streams up to 100 MB.
+  ghFetch = file: ''gh api "/repos/''${GH_OWNER}/''${GH_REPO}/contents/${file}?ref=''${NEW_REV}" -H "Accept: application/vnd.github.raw"'';
 
   body =
     if manager == "npm" && source == "shipped" then ''

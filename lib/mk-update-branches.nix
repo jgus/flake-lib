@@ -11,6 +11,7 @@ pkgs.writeShellApplication {
   runtimeEnv = {
     SOURCE_TYPE = source.type;
     PYPI_NAME = source.pname or "";
+    PYPI_FORMAT = source.format or "sdist";
     GH_OWNER = source.owner or "";
     GH_REPO = source.repo or "";
     PIN_SCHEMA = pinSchema;

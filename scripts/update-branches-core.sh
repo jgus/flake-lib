@@ -38,9 +38,11 @@ cd "${FLAKE_ROOT}"
 list_upstream_versions() {
   case "${SOURCE_TYPE}" in
     pypi)
-      # sdist-only: wheel-only releases would 404 on fetchPypi.
+      # Match the artifact type the flake fetches (fetchPypi format): sdist -> source tarball, wheel -> bdist_wheel. Releases lacking that artifact are skipped (they would 404 on fetchPypi).
+      local want="sdist"
+      [ "${PYPI_FORMAT:-sdist}" = "wheel" ] && want="bdist_wheel"
       curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" \
-        | jq -r '.releases | to_entries[] | select(.value | any(.packagetype == "sdist")) | .key'
+        | jq -r --arg want "${want}" '.releases | to_entries[] | select(.value | any(.packagetype == $want)) | .key'
       ;;
     github)
       gh api --paginate "/repos/${GH_OWNER}/${GH_REPO}/releases" --jq '.[].tag_name'
