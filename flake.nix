@@ -35,9 +35,22 @@
           source = { type = "github"; owner = "example"; repo = "example"; track = "commit"; };
           buildAttr = "example";
         };
+        # JS-deps hooks: each writeShellApplication is shellcheck-validated at build. mkComposedHook wraps a shared hook beside a bespoke one.
+        npm-shipped-hook = lib.mkJsDepsHook { inherit pkgs; manager = "npm"; fetcherVersion = 2; };
+        npm-generated-hook = lib.mkJsDepsHook { inherit pkgs; manager = "npm"; source = "generated"; };
+        yarn-hook = lib.mkJsDepsHook { inherit pkgs; manager = "yarn"; };
+        composed-hook = lib.mkComposedHook { inherit pkgs; hooks = [ npm-generated-hook yarn-hook ]; };
+        # getExe returns an exe path string; wrap so it's a derivation the checks can build.
+        hookCheck = name: exe: pkgs.runCommand name { } "test -x ${exe} && touch $out";
       in
       {
         packages = { inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash; };
-        checks = { inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash; };
+        checks = {
+          inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash;
+          npm-shipped-hook = hookCheck "npm-shipped-hook" npm-shipped-hook;
+          npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
+          yarn-hook = hookCheck "yarn-hook" yarn-hook;
+          composed-hook = hookCheck "composed-hook" composed-hook;
+        };
       });
 }

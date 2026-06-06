@@ -46,6 +46,7 @@ SIBLINGS="${SIBLINGS:-[]}"
 CASCADE_PY="${CASCADE_PY:-}"
 GH_TRACK="${GH_TRACK:-release}"        # github: release (tags) | commit (default-branch HEAD)
 GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follow
+GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
 
 declare -A extra=()
 
@@ -119,8 +120,10 @@ run_artifact_hook() {
   hook_out=$(NEW_REV="${rev}" NEW_VERSION="${v}" FLAKE_ROOT="${FLAKE_ROOT}" \
     GH_OWNER="${GH_OWNER}" GH_REPO="${GH_REPO}" \
     GITLAB_OWNER="${GITLAB_OWNER}" GITLAB_REPO="${GITLAB_REPO}" "${ARTIFACT_HOOK}")
-  while IFS='=' read -r k val; do
-    [[ -n "${k}" ]] && extra["${k}"]="${val}"
+  while IFS= read -r line; do
+    # Split on the first '=' only, so a base64 SRI's trailing '=' padding survives.
+    k="${line%%=*}"
+    [[ -n "${k}" ]] && extra["${k}"]="${line#*=}"
   done <<<"${hook_out}"
 }
 
@@ -239,7 +242,7 @@ EOF
       new_hash=""
     else
       echo "Computing source hash for ${GH_OWNER}/${GH_REPO}@${new_rev}..."
-      new_hash=$(nix-prefetch-github --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
+      new_hash=$(nix-prefetch-github ${GH_FETCH_SUBMODULES:+--fetch-submodules} --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
     fi
     echo "Writing pin.nix (-> ${new_version})..."
     write_source_pin "${new_version}" "${new_rev}" "${new_hash}"

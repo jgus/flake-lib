@@ -26,6 +26,7 @@ pkgs.writeShellApplication {
     GH_REPO = source.repo or "";
     GH_TRACK = source.track or "release"; # release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)
     GH_BRANCH = source.branch or ""; # commit-tracking: branch to follow (default: repo's default branch)
+    GH_FETCH_SUBMODULES = if (source.fetchSubmodules or false) then "1" else ""; # hash the tree with submodules (src must set fetchSubmodules = true)
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
     BUILD_ATTR = buildAttr;
