@@ -6,6 +6,8 @@
 { pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ], versionOverrides ? { } }:
 pkgs.writeShellApplication {
   name = "update-branches";
+  # VERSION_OVERRIDES is a JSON string (quotes/braces) consumed via jq at runtime; the generated export trips SC2089/SC2090 (false positive).
+  excludeShellChecks = [ "SC2089" "SC2090" ];
   runtimeEnv = {
     SOURCE_TYPE = source.type;
     PYPI_NAME = source.pname or "";
