@@ -177,7 +177,8 @@ case "${SOURCE_TYPE}" in
     echo "Resolving ${PYPI_NAME} ${new_version} on PyPI..."
     rel=$(curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/${new_version}/json")
     if [[ "${PYPI_FORMAT}" == "wheel" ]]; then
-      url=$(jq -r '[.urls[] | select(.packagetype == "bdist_wheel")][0].url' <<<"${rel}")
+      # Prefer the universal py3-none-any wheel (what mk-pypi-package fetches); fall back to the first wheel.
+      url=$(jq -r '([.urls[] | select(.packagetype == "bdist_wheel") | select(.filename | endswith("-py3-none-any.whl"))][0].url) // ([.urls[] | select(.packagetype == "bdist_wheel")][0].url)' <<<"${rel}")
     else
       url=$(jq -r '[.urls[] | select(.packagetype == "sdist")][0].url' <<<"${rel}")
     fi

@@ -18,9 +18,11 @@ let
   srcAttrs =
     if format == "wheel" then {
       format = "wheel";
+      # Universal wheel. fetchPypi's `dist` (URL path segment) and `python` (filename tag) both default to py2.py3; a py3-none-any wheel needs both set to py3, else the path 404s. Platform-specific wheels aren't covered here.
       src = ps.fetchPypi {
         pname = source.pname;
         format = "wheel";
+        dist = "py3";
         python = "py3";
         inherit version hash;
       };
