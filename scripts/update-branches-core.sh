@@ -128,7 +128,8 @@ if (( ${#raw_versions[@]} == 0 )); then
   exit 1
 fi
 # Optional remap of upstream versions whose tag numbering doesn't sort correctly (see VERSION_OVERRIDES in mkUpdateBranches). `all_versions` and everything downstream use the canonical form; `orig_of` recovers the raw upstream version so update-version still fetches the real tag.
-VERSION_OVERRIDES="${VERSION_OVERRIDES:-{}}"
+VERSION_OVERRIDES="${VERSION_OVERRIDES:-}"
+[[ -n "${VERSION_OVERRIDES}" ]] || VERSION_OVERRIDES='{}'
 declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
