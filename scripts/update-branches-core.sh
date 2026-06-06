@@ -139,6 +139,8 @@ declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
   v="${v#[Vv]}"
+  # Drop semver prereleases (X.Y.Z-foo) when opted in. sort -V ranks 0.8.6-rc1 *after* 0.8.6, so an upstream that tags release candidates (e.g. LibreChat) would otherwise pin aggregates to the rc. Off by default — some flakes legitimately track -beta tags.
+  if [[ -n "${EXCLUDE_PRERELEASES:-}" && "${v}" == *-* ]]; then continue; fi
   if [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+a-zA-Z0-9.]+)?$ ]]; then
     canon=$(jq -r --arg v "${v}" '.[$v] // $v' <<<"${VERSION_OVERRIDES}")
     all_versions+=("${canon}")
