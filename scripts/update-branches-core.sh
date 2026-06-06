@@ -127,11 +127,16 @@ if (( ${#raw_versions[@]} == 0 )); then
   echo "error: list_upstream_versions returned no rows (auth issue?)" >&2
   exit 1
 fi
+# Optional remap of upstream versions whose tag numbering doesn't sort correctly (see VERSION_OVERRIDES in mkUpdateBranches). `all_versions` and everything downstream use the canonical form; `orig_of` recovers the raw upstream version so update-version still fetches the real tag.
+VERSION_OVERRIDES="${VERSION_OVERRIDES:-{}}"
 declare -a all_versions=()
+declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
   v="${v#[Vv]}"
   if [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+a-zA-Z0-9.]+)?$ ]]; then
-    all_versions+=("${v}")
+    canon=$(jq -r --arg v "${v}" '.[$v] // $v' <<<"${VERSION_OVERRIDES}")
+    all_versions+=("${canon}")
+    orig_of["${canon}"]="${v}"
   fi
 done
 
@@ -172,7 +177,7 @@ for v in "${tracked[@]}"; do
   pushd "${wt}" >/dev/null
   set +e
   nix flake update --option post-build-hook ""
-  FLAKE_ROOT="${wt}" nix run --option post-build-hook "" .#update-version -- "${v}"
+  FLAKE_ROOT="${wt}" nix run --option post-build-hook "" .#update-version -- "${v}" "${orig_of[$v]}"
   uv_exit=$?
   set -e
   if (( uv_exit != 0 )); then

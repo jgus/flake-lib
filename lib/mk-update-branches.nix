@@ -2,7 +2,8 @@
 # ../scripts/update-branches-core.sh; this injects the per-flake spec as env vars.
 #   pinSchema        : pypi | github | github-npm | github-yarn | version-only (placeholder pin shape)
 #   branchOwnedFiles : files update-version mutates (diffed, added, committed per branch)
-{ pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ] }:
+#   versionOverrides : map of raw upstream version -> canonical version, for upstreams whose tag numbering doesn't sort right (e.g. { "0.1.405-beta" = "0.1.40.5-beta"; }). The canonical form drives sorting/branch naming/the pin's version field; the raw form remains what update-version fetches.
+{ pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ], versionOverrides ? { } }:
 pkgs.writeShellApplication {
   name = "update-branches";
   runtimeEnv = {
@@ -12,6 +13,7 @@ pkgs.writeShellApplication {
     GH_REPO = source.repo or "";
     PIN_SCHEMA = pinSchema;
     BRANCH_OWNED_FILES = pkgs.lib.concatStringsSep " " branchOwnedFiles;
+    VERSION_OVERRIDES = builtins.toJSON versionOverrides;
   };
   text = ''exec ${../scripts/update-branches-core.sh} "$@"'';
 }

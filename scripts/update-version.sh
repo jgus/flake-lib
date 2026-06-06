@@ -32,6 +32,8 @@ if [[ ! -f "${pin}" ]]; then
 fi
 
 requested="${1:-}"
+# Optional upstream ref to fetch, distinct from the version written to the pin. Lets the orchestrator pin a canonical version string (e.g. 0.1.40.5-beta) while still resolving the raw upstream tag (e.g. v0.1.405-beta). Defaults to `requested`, i.e. version == ref.
+requested_ref="${2:-}"
 pin_changed=0
 new_version=""
 
@@ -214,15 +216,17 @@ EOF
         new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
         new_version="${new_version#[Vv]}"
       fi
+      ref_base="${requested_ref:-${new_version}}"
+      ref_base="${ref_base#[Vv]}"
       new_rev=""
-      for candidate in "v${new_version}" "V${new_version}" "${new_version}"; do
+      for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
         if sha=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null); then
           new_rev="${sha}"
           break
         fi
       done
       if [[ -z "${new_rev}" ]]; then
-        echo "error: could not resolve v${new_version} / V${new_version} / ${new_version} on ${GH_OWNER}/${GH_REPO}" >&2
+        echo "error: could not resolve v${ref_base} / V${ref_base} / ${ref_base} on ${GH_OWNER}/${GH_REPO}" >&2
         exit 1
       fi
     fi
