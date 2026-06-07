@@ -125,6 +125,7 @@ run_artifact_hook() {
     k="${line%%=*}"
     [[ -n "${k}" ]] && extra["${k}"]="${line#*=}"
   done <<<"${hook_out}"
+  return 0 # the loop's status is its last body command — a falsy `[[ -n ]]` on an empty/keyless line — which would trip the caller's set -e; this function has no meaningful return
 }
 
 revalidate_hash() {
