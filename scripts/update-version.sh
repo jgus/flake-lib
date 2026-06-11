@@ -1,12 +1,14 @@
 #!/usr/bin/env -S nix shell nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#nix nixpkgs#gh nixpkgs#gnused nixpkgs#nix-prefetch-github nixpkgs#nix-prefetch-git nixpkgs#coreutils --command bash
 
 # Generic update-version for jgus sub-flakes, driven by env vars injected by flake-lib's mkUpdateVersion:
-#   SOURCE_TYPE   pypi | github | gitlab
+#   SOURCE_TYPE   pypi | github | github-release-asset | gitlab
 #   PYPI_NAME     PyPI distribution name (underscore form)   [pypi]
 #   PYPI_FORMAT   sdist | wheel                              [pypi]
-#   GH_OWNER/GH_REPO          GitHub owner/repo              [github]
+#   GH_OWNER/GH_REPO          GitHub owner/repo              [github, github-release-asset]
 #   GH_TRACK                  release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)  [github]
 #   GH_BRANCH                 commit-tracking: branch to follow (default: repo default branch)  [github]
+#   GH_ASSET                  release-asset filename template; tokens ${version} (tag minus leading v) and ${tag}  [github-release-asset]
+#   GH_TAG                    release-tag template; token ${version} (default: v${version})  [github-release-asset]
 #   GITLAB_OWNER/GITLAB_REPO  GitLab owner/repo              [gitlab]
 #   BUILD_ATTR    flake package attr to build-verify
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
@@ -47,6 +49,8 @@ CASCADE_PY="${CASCADE_PY:-}"
 GH_TRACK="${GH_TRACK:-release}"        # github: release (tags) | commit (default-branch HEAD)
 GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follow
 GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
+GH_ASSET="${GH_ASSET:-}"               # github-release-asset: filename template (tokens ${version}, ${tag})
+GH_TAG="${GH_TAG:-}"                   # github-release-asset: tag template (token ${version}); default v${version}
 
 declare -A extra=()
 
@@ -254,6 +258,47 @@ EOF
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_siblings "${new_rev}"
     fi
+    ;;
+
+  github-release-asset)
+    # A prebuilt release asset (single file), not the source tree: resolve the version like `github`
+    # (latest release tag, or the requested version), then prefetch-file the asset URL into a
+    # { version, hash } pin. No sourceRev — there is no tree to hash. Release assets are immutable,
+    # so a matching populated pin short-circuits before the (potentially large) download.
+    if [[ -z "${GH_ASSET}" ]]; then
+      echo "error: github-release-asset requires source.asset (GH_ASSET)" >&2
+      exit 1
+    fi
+    if [[ -n "${requested}" ]]; then
+      new_version="${requested#[Vv]}"
+    else
+      echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
+      new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
+      new_version="${new_version#[Vv]}"
+    fi
+    cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
+    cur_hash=$(nix eval --raw --file "${pin}" hash 2>/dev/null || echo "")
+    if [[ "${cur_version}" == "${new_version}" && -n "${cur_hash}" ]]; then
+      echo "Already up to date (${new_version})."
+      exit 0
+    fi
+    tag_tmpl="${GH_TAG}"
+    [[ -n "${tag_tmpl}" ]] || tag_tmpl='v${version}'
+    tag="${tag_tmpl//'${version}'/${new_version}}"
+    asset="${GH_ASSET//'${version}'/${new_version}}"
+    asset="${asset//'${tag}'/${tag}}"
+    url="https://github.com/${GH_OWNER}/${GH_REPO}/releases/download/${tag}/${asset}"
+    echo "Prefetching ${url}..."
+    new_hash=$(nix store prefetch-file --json --hash-type sha256 "${url}" | jq -r '.hash')
+    echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
+    cat > "${pin}" <<EOF
+# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
+{
+  version = "${new_version}";
+  hash = "${new_hash}";
+}
+EOF
+    pin_changed=1
     ;;
 
   gitlab)

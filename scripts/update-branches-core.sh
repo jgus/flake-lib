@@ -22,10 +22,10 @@
 # annotations + a step summary, and cause a non-zero exit at the end of the run.
 #
 # Per-flake variation is fully driven by env vars injected by flake-lib's mkUpdateBranches:
-#   SOURCE_TYPE          pypi | github  (gitlab leaves are single-branch, no orchestrator)
+#   SOURCE_TYPE          pypi | github | github-release-asset  (gitlab leaves are single-branch, no orchestrator)
 #   PYPI_NAME            [pypi]
-#   GH_OWNER/GH_REPO     [github]
-#   PIN_SCHEMA           pypi | github | github-npm | github-yarn | version-only
+#   GH_OWNER/GH_REPO     [github, github-release-asset]
+#   PIN_SCHEMA           pypi | github | github-npm | github-yarn | github-asset | version-only
 #   BRANCH_OWNED_FILES   space-separated files update-version mutates per branch
 
 set -euo pipefail
@@ -47,7 +47,7 @@ list_upstream_versions() {
           | jq -r '.releases | to_entries[] | select(.value | any(.packagetype == "sdist")) | .key'
       fi
       ;;
-    github)
+    github | github-release-asset)
       gh api --paginate "/repos/${GH_OWNER}/${GH_REPO}/releases" --jq '.[].tag_name'
       ;;
     *)
@@ -98,6 +98,17 @@ EOF
   sourceRev = "";
   sourceHash = "";
   yarnHash = "";
+}
+EOF
+      ;;
+    github-asset)
+      # Single prebuilt release asset: { version, hash } like pypi, but the asset URL is a
+      # GitHub release download (see SOURCE_TYPE=github-release-asset in update-version.sh).
+      cat > pin.nix <<EOF
+# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
+{
+  version = "${v}";
+  hash = "";
 }
 EOF
       ;;

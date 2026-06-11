@@ -14,9 +14,8 @@
 }:
 pkgs.writeShellApplication {
   name = "update-version";
-  # EXTRA_HASHES / SIBLINGS are JSON strings (quotes/brackets) consumed via jq at
-  # runtime; writeShellApplication's generated export trips SC2089/SC2090 (false positive).
-  excludeShellChecks = [ "SC2089" "SC2090" ];
+  # EXTRA_HASHES / SIBLINGS are JSON strings (quotes/brackets) consumed via jq at runtime (SC2089/SC2090); GH_ASSET/GH_TAG carry a literal ${version}/${tag} token the script substitutes at runtime, intentionally single-quoted (SC2016). All false positives on the generated export.
+  excludeShellChecks = [ "SC2016" "SC2089" "SC2090" ];
   runtimeInputs = pkgs.lib.optional (siblings != [ ]) (pkgs.python3.withPackages (p: [ p.packaging ]));
   runtimeEnv = {
     SOURCE_TYPE = source.type;
@@ -27,6 +26,8 @@ pkgs.writeShellApplication {
     GH_TRACK = source.track or "release"; # release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)
     GH_BRANCH = source.branch or ""; # commit-tracking: branch to follow (default: repo's default branch)
     GH_FETCH_SUBMODULES = if (source.fetchSubmodules or false) then "1" else ""; # hash the tree with submodules (src must set fetchSubmodules = true)
+    GH_ASSET = source.asset or ""; # github-release-asset: filename template, tokens ${version} and ${tag}
+    GH_TAG = source.tag or ""; # github-release-asset: tag template, token ${version} (default v${version})
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
     BUILD_ATTR = buildAttr;

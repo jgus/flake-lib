@@ -27,9 +27,24 @@ flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
 ```
 
-`source.type` is `pypi`, `github`, or `gitlab`. The update machinery and the
-orchestrator's per-flake bits (`list_upstream_versions`, `write_placeholder_pin`,
-the sibling-cascade URL rewrite) are all driven from that spec.
+`source.type` is `pypi`, `github`, `github-release-asset`, or `gitlab`. `github`
+hashes the source *tree* at a release tag (`{ version, sourceRev, sourceHash }`);
+`github-release-asset` instead prefetches a single prebuilt release asset into a
+`{ version, hash }` pin (`pinSchema = "github-asset"`), for upstreams shipped as a
+ready-to-run binary/jar rather than built from source:
+
+```nix
+source = {
+  type = "github-release-asset";
+  owner = "Suwayomi"; repo = "Suwayomi-Server";
+  asset = "Suwayomi-Server-v\${version}.jar";  # tokens: \${version} (tag minus leading v), \${tag}
+  # tag = "\${version}";                        # optional; default "v\${version}"
+};
+```
+
+The update machinery and the orchestrator's per-flake bits
+(`list_upstream_versions`, `write_placeholder_pin`, the sibling-cascade URL
+rewrite) are all driven from that spec.
 
 `templates/` holds the `.gitattributes` and `update.yml` a consuming repo needs.
 
