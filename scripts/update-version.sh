@@ -10,6 +10,7 @@
 #   GH_ASSET                  release-asset filename template; tokens ${version} (tag minus leading v) and ${tag}  [github-release-asset]
 #   GH_TAG                    release-tag template; token ${version} (default: v${version})  [github-release-asset]
 #   GITLAB_OWNER/GITLAB_REPO  GitLab owner/repo              [gitlab]
+#   GITLAB_TRACK              release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)  [gitlab]
 #   BUILD_ATTR    flake package attr to build-verify
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
 #   CASCADE_PY    path to cascade.py (python3+packaging supplied via runtimeInputs)
@@ -51,6 +52,7 @@ GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follo
 GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
 GH_ASSET="${GH_ASSET:-}"               # github-release-asset: filename template (tokens ${version}, ${tag})
 GH_TAG="${GH_TAG:-}"                   # github-release-asset: tag template (token ${version}); default v${version}
+GITLAB_TRACK="${GITLAB_TRACK:-commit}"  # gitlab: release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)
 
 declare -A extra=()
 
@@ -303,15 +305,41 @@ EOF
 
   gitlab)
     proj="${GITLAB_OWNER}%2F${GITLAB_REPO}"
-    if [[ -n "${requested}" ]]; then
-      commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${requested}")
+    if [[ "${GITLAB_TRACK}" == "release" ]]; then
+      if [[ -n "${requested}" ]]; then
+        new_version="${requested#[Vv]}"
+      else
+        echo "Querying GitLab for latest tag of ${GITLAB_OWNER}/${GITLAB_REPO}..."
+        new_version=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/tags" | jq -r '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
+        new_version="${new_version#[Vv]}"
+      fi
+      if [[ -z "${new_version}" ]]; then
+        echo "error: could not determine a release tag for ${GITLAB_OWNER}/${GITLAB_REPO}" >&2
+        exit 1
+      fi
+      ref_base="${requested_ref:-${new_version}}"
+      ref_base="${ref_base#[Vv]}"
+      new_rev=""
+      for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
+        if id=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${candidate}" 2>/dev/null | jq -r '.id // ""'); then
+          if [[ -n "${id}" && "${id}" != "null" ]]; then new_rev="${id}"; break; fi
+        fi
+      done
+      if [[ -z "${new_rev}" ]]; then
+        echo "error: could not resolve v${ref_base} / V${ref_base} / ${ref_base} on ${GITLAB_OWNER}/${GITLAB_REPO}" >&2
+        exit 1
+      fi
     else
-      echo "Querying GitLab for latest master commit of ${GITLAB_OWNER}/${GITLAB_REPO}..."
-      commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/branches/master" | jq -r '.commit')
+      if [[ -n "${requested}" ]]; then
+        commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${requested}")
+      else
+        echo "Querying GitLab for latest master commit of ${GITLAB_OWNER}/${GITLAB_REPO}..."
+        commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/branches/master" | jq -r '.commit')
+      fi
+      new_rev=$(jq -r '.id' <<<"${commit}")
+      new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)
+      new_version="0-unstable-${new_date}"
     fi
-    new_rev=$(jq -r '.id' <<<"${commit}")
-    new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)
-    new_version="0-unstable-${new_date}"
     if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
       echo "Already up to date (${new_version})."
       exit 0

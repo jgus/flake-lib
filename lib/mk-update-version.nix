@@ -30,6 +30,7 @@ pkgs.writeShellApplication {
     GH_TAG = source.tag or ""; # github-release-asset: tag template, token ${version} (default v${version})
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
+    GITLAB_TRACK = source.track or "commit"; # release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)
     BUILD_ATTR = buildAttr;
     HASH_MODE = hashMode;
     EXTRA_HASHES = builtins.toJSON extraHashes;
