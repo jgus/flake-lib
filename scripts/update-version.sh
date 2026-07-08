@@ -5,7 +5,7 @@
 #   PYPI_NAME     PyPI distribution name (underscore form)   [pypi]
 #   PYPI_FORMAT   sdist | wheel                              [pypi]
 #   GH_OWNER/GH_REPO          GitHub owner/repo              [github, github-release-asset]
-#   GH_TRACK                  release (tags) | commit (default-branch HEAD -> 0-unstable-DATE)  [github]
+#   GH_TRACK                  release (Releases API) | tag (latest version git tag) | commit (default-branch HEAD -> 0-unstable-DATE)  [github]
 #   GH_BRANCH                 commit-tracking: branch to follow (default: repo default branch)  [github]
 #   GH_ASSET                  release-asset filename template; tokens ${version} (tag minus leading v) and ${tag}  [github-release-asset]
 #   GH_TAG                    release-tag template; token ${version} (default: v${version})  [github-release-asset]
@@ -47,7 +47,7 @@ ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored
 SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
 SIBLINGS="${SIBLINGS:-[]}"
 CASCADE_PY="${CASCADE_PY:-}"
-GH_TRACK="${GH_TRACK:-release}"        # github: release (tags) | commit (default-branch HEAD)
+GH_TRACK="${GH_TRACK:-release}"        # github: release (Releases API) | tag (latest version git tag) | commit (default-branch HEAD)
 GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follow
 GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
 GH_ASSET="${GH_ASSET:-}"               # github-release-asset: filename template (tokens ${version}, ${tag})
@@ -222,6 +222,14 @@ EOF
     else
       if [[ -n "${requested}" ]]; then
         new_version="${requested#[Vv]}"
+      elif [[ "${GH_TRACK}" == "tag" ]]; then
+        echo "Querying GitHub for latest tag of ${GH_OWNER}/${GH_REPO}..."
+        new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" --jq '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
+        new_version="${new_version#[Vv]}"
+        if [[ -z "${new_version}" ]]; then
+          echo "error: could not determine a version tag for ${GH_OWNER}/${GH_REPO}" >&2
+          exit 1
+        fi
       else
         echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
         new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
