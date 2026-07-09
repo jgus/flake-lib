@@ -25,6 +25,10 @@ flake-lib.lib.mkLeafFlake {
 flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; }
 flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; }
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
+
+# Returns pkgs.${name}, emitting an eval warning when a version-numbered nixpkgs
+# package (postgresql_18, php83, jdk21_headless, …) has a higher major available.
+flake-lib.lib.warnIfNewerMajor { pkgs; name; lib ? pkgs.lib; }
 ```
 
 `source.type` is `pypi`, `github`, `github-release-asset`, or `gitlab`. `github`
