@@ -132,6 +132,22 @@ EOF
 
 version_lt() { [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$1" ]]; }
 
+canonicalize_version() {
+  local v="$1" canon rule
+  canon=$(jq -r --arg v "${v}" '.[$v] // ""' <<<"${VERSION_OVERRIDES}")
+  if [[ -n "${canon}" ]]; then
+    printf '%s' "${canon}"
+    return
+  fi
+  canon="${v}"
+  while IFS= read -r rule; do
+    if [[ -n "${rule}" ]]; then
+      canon=$(sed -E "${rule}" <<<"${canon}")
+    fi
+  done <<<"${VERSION_CANON}"
+  printf '%s' "${canon}"
+}
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 # Define the `ours` merge driver so .gitattributes' `merge=ours` rules take effect: `true` exits 0 without touching the file, leaving the branch's version.
@@ -143,9 +159,10 @@ if (( ${#raw_versions[@]} == 0 )); then
   echo "error: list_upstream_versions returned no rows (auth issue?)" >&2
   exit 1
 fi
-# Optional remap of upstream versions whose tag numbering doesn't sort correctly (see VERSION_OVERRIDES in mkUpdateBranches). `all_versions` and everything downstream use the canonical form; `orig_of` recovers the raw upstream version so update-version still fetches the real tag.
+# Optional remap of upstream versions whose tag numbering doesn't sort correctly (see VERSION_OVERRIDES / VERSION_CANON in mkUpdateBranches). `all_versions` and everything downstream use the canonical form; `orig_of` recovers the raw upstream version so update-version still fetches the real tag.
 VERSION_OVERRIDES="${VERSION_OVERRIDES:-}"
 [[ -n "${VERSION_OVERRIDES}" ]] || VERSION_OVERRIDES='{}'
+VERSION_CANON="${VERSION_CANON:-}"
 declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
@@ -153,7 +170,7 @@ for v in "${raw_versions[@]}"; do
   # Drop semver prereleases (X.Y.Z-foo) when opted in. sort -V ranks 0.8.6-rc1 *after* 0.8.6, so an upstream that tags release candidates (e.g. LibreChat) would otherwise pin aggregates to the rc. Off by default — some flakes legitimately track -beta tags.
   if [[ -n "${EXCLUDE_PRERELEASES:-}" && "${v}" == *-* ]]; then continue; fi
   if [[ "${v}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+a-zA-Z0-9.]+)?$ ]]; then
-    canon=$(jq -r --arg v "${v}" '.[$v] // $v' <<<"${VERSION_OVERRIDES}")
+    canon=$(canonicalize_version "${v}")
     all_versions+=("${canon}")
     orig_of["${canon}"]="${v}"
   fi

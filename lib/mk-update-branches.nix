@@ -3,7 +3,8 @@
 #   pinSchema        : pypi | github | github-npm | github-yarn | version-only (placeholder pin shape)
 #   branchOwnedFiles : files update-version mutates (diffed, added, committed per branch)
 #   versionOverrides : map of raw upstream version -> canonical version, for upstreams whose tag numbering doesn't sort right (e.g. { "0.1.405-beta" = "0.1.40.5-beta"; }). The canonical form drives sorting/branch naming/the pin's version field; the raw form remains what update-version fetches.
-{ pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ], versionOverrides ? { }, excludePrereleases ? false }:
+#   versionCanon     : list of `sed -E` expressions applied in order to each raw version to derive its canonical form, for a tag-numbering scheme too general to enumerate in versionOverrides (e.g. every 0.1.XXX-beta hotfix -> 0.1.XX.X-beta). A matching versionOverrides entry takes precedence over these rules.
+{ pkgs, source, pinSchema, branchOwnedFiles ? [ "pin.nix" "flake.lock" ], versionOverrides ? { }, versionCanon ? [ ], excludePrereleases ? false }:
 pkgs.writeShellApplication {
   name = "update-branches";
   # VERSION_OVERRIDES is a JSON string (quotes/braces) consumed via jq at runtime; the generated export trips SC2089/SC2090 (false positive).
@@ -17,6 +18,7 @@ pkgs.writeShellApplication {
     PIN_SCHEMA = pinSchema;
     BRANCH_OWNED_FILES = pkgs.lib.concatStringsSep " " branchOwnedFiles;
     VERSION_OVERRIDES = builtins.toJSON versionOverrides;
+    VERSION_CANON = pkgs.lib.concatStringsSep "\n" versionCanon;
     EXCLUDE_PRERELEASES = pkgs.lib.optionalString excludePrereleases "1";
   };
   text = ''exec ${../scripts/update-branches-core.sh} "$@"'';
