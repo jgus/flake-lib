@@ -1,9 +1,8 @@
-# Generates the `update-version` package. The logic lives in ../scripts/update-version.sh;
-# this only injects the per-flake spec as env vars.
+# Generates the `update-version` package.
 #   hashMode     : "prefetch" (default) or "build-failure" (vendor hashes that can't be prefetched)
 #   extraHashes  : extra pin field names whose values the artifactHook emits (e.g. [ "npmDepsHash" ])
 #   artifactHook : consumer script (path) that regenerates vendored files + prints name=value extra hashes
-#   siblings     : sibling-cascade specs (needs python3+packaging, added below)
+#   siblings     : sibling-cascade specs
 { pkgs
 , source
 , buildAttr

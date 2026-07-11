@@ -1,10 +1,8 @@
-# Generates a flake-lib artifactHook that computes a JS package-manager offline-deps hash for the pinned rev and prints it as one `name=value` line (the seam mkUpdateVersion captures into pin.nix). Returns an executable path, usable directly as `artifactHook` or composed via mkComposedHook.
+# Generates a flake-lib artifactHook that computes a JS package-manager offline-deps hash for the pinned rev and prints it as one `name=value` line for mkUpdateVersion to capture into pin.nix.
 #
-#   manager        : "npm" | "yarn"
 #   source         : "shipped"   — upstream ships the lockfile; fetch it from the repo at NEW_REV (buildNpmPackage/fetchYarnDeps consume upstream's directly)
 #                    "generated" — upstream ships none; regenerate it from package.json and vendor it into FLAKE_ROOT (the flake's build copies ./package-lock.json). npm only.
-#   field          : pin field name (default npmDepsHash / yarnHash)
-#   fetcherVersion : npm only; when set, export NPM_FETCHER_VERSION (must match the flake's npmDepsFetcherVersion — it changes the hash)
+#   fetcherVersion : npm only; must match the flake's npmDepsFetcherVersion — it changes the hash
 { pkgs
 , manager
 , source ? "shipped"

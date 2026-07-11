@@ -1,9 +1,6 @@
 # flake-lib
 
-Shared library for the `jgus/*-flake` family of pinned-dependency sub-flakes. It
-removes the boilerplate those repos used to copy by hand: the per-version-branch
-orchestrator, the `update-version` machinery, and PyPI package builders are all
-generated here from a small declarative spec.
+Shared library for the `jgus/*-flake` family of pinned-dependency sub-flakes. It generates the boilerplate those repos would otherwise hand-copy: the per-version-branch orchestrator, the `update-version` machinery, and PyPI package builders all come from a small declarative spec.
 
 Consumers pin it as an input (`github:jgus/flake-lib/v1`) and pull improvements by
 bumping that pin — the same `nix flake update` the orchestrator already runs per
@@ -22,9 +19,12 @@ flake-lib.lib.mkLeafFlake {
 # => packages.<system> = { <attr>; update-version; update-branches; default; }
 
 # Low-level: bespoke flakes supply their own package derivation.
-flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; }
-flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; }
+flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; hashMode ? "prefetch"; extraHashes ? []; artifactHook ? null; }
+flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; minVersionComponents ? 3; }
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
+flake-lib.lib.mkRevalidateHash { pkgs; buildAttr; hashField ? "hash"; }
+flake-lib.lib.mkJsDepsHook     { pkgs; manager; source ? "shipped"; field ? null; fetcherVersion ? null; }
+flake-lib.lib.mkComposedHook   { pkgs; hooks; }
 
 # Returns pkgs.${name}, emitting an eval warning when a version-numbered nixpkgs
 # package (postgresql_18, php83, jdk21_headless, …) has a higher major available.
@@ -50,7 +50,7 @@ The update machinery and the orchestrator's per-flake bits
 (`list_upstream_versions`, `write_placeholder_pin`, the sibling-cascade URL
 rewrite) are all driven from that spec.
 
-`templates/` holds the `.gitattributes` and `update.yml` a consuming repo needs.
+`templates/` holds `gitattributes` and `workflow.yml`, which a consuming repo installs as `.gitattributes` and `.github/workflows/update.yml`.
 
 ## Versioning
 

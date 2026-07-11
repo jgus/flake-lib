@@ -1,15 +1,11 @@
 #!/usr/bin/env -S nix shell nixpkgs#bash nixpkgs#nix nixpkgs#gnused nixpkgs#coreutils --command bash
 
-# Revalidate a fixed-output (vendor) hash that can't be prefetched — Go modules,
-# cargo deps, npm FODs, xcaddy plugin trees. The hash is only knowable by building:
-# write the pin with the current/placeholder hash, build, and on nix's
-# "got: sha256-..." mismatch, rewrite the field and rebuild to verify.
+# Revalidate a fixed-output (vendor) hash that can't be prefetched — Go modules, cargo deps, npm FODs, xcaddy plugin trees — by building and recovering the correct hash from nix's mismatch error.
 #
 #   BUILD_ATTR   flake attr to build (required)
 #   HASH_FIELD   pin.nix field to rewrite (default "hash")
 #
-# Run from the flake root (or set FLAKE_ROOT). Used directly by manifest-style
-# flakes (e.g. caddy) and internally by update-version's build-failure hash mode.
+# Run from the flake root (or set FLAKE_ROOT). Used directly by manifest-style flakes (e.g. caddy).
 
 set -euo pipefail
 

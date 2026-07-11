@@ -7,7 +7,6 @@ let
   mkComposedHook = import ./mk-composed-hook.nix;
   mkLeafFlake = import ./mk-leaf-flake.nix { inherit mkPypiPackage mkUpdateVersion mkUpdateBranches; };
 
-  # Returns pkgs.${name}, warning when nixpkgs carries a higher major in the same family.
   warnIfNewerMajor = { pkgs, name, lib ? pkgs.lib }:
     let
       parts = builtins.match "([^0-9]*)([0-9]+)(.*)" name;

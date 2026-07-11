@@ -15,8 +15,7 @@
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
 #   CASCADE_PY    path to cascade.py (python3+packaging supplied via runtimeInputs)
 #
-# Pins pin.nix (and, for cascades, the sibling URLs in flake.nix) to a specific or latest
-# upstream release, re-validating every hash. Idempotent: a no-op when nothing changed.
+# Pins pin.nix (and, for cascades, the sibling URLs in flake.nix) to a specific or latest upstream release, re-validating every hash. Idempotent: a no-op when nothing changed.
 #
 #   nix run .#update-version            # latest upstream
 #   nix run .#update-version -- X.Y.Z   # specific version / ref
@@ -47,17 +46,16 @@ ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored
 SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
 SIBLINGS="${SIBLINGS:-[]}"
 CASCADE_PY="${CASCADE_PY:-}"
-GH_TRACK="${GH_TRACK:-release}"        # github: release (Releases API) | tag (latest version git tag) | commit (default-branch HEAD)
-GH_BRANCH="${GH_BRANCH:-}"             # github commit-tracking: branch to follow
+GH_TRACK="${GH_TRACK:-release}"
+GH_BRANCH="${GH_BRANCH:-}"
 GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
-GH_ASSET="${GH_ASSET:-}"               # github-release-asset: filename template (tokens ${version}, ${tag})
-GH_TAG="${GH_TAG:-}"                   # github-release-asset: tag template (token ${version}); default v${version}
-GITLAB_TRACK="${GITLAB_TRACK:-commit}"  # gitlab: release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)
+GH_ASSET="${GH_ASSET:-}"
+GH_TAG="${GH_TAG:-}"
+GITLAB_TRACK="${GITLAB_TRACK:-commit}"
 
 declare -A extra=()
 
 fetch_repo_file() {
-  # $1 = path in repo, $2 = rev. Echoes file contents on stdout.
   local path="$1" rev="$2" proj enc
   case "${SOURCE_TYPE}" in
     github)
@@ -102,7 +100,6 @@ resolve_and_rewrite_siblings() {
 }
 
 write_source_pin() {
-  # $1 version, $2 sourceRev, $3 sourceHash. Appends EXTRA_HASHES fields from `extra`.
   local v="$1" rev="$2" h="$3" name
   {
     echo "# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump."
@@ -118,8 +115,7 @@ write_source_pin() {
 }
 
 run_artifact_hook() {
-  # $1 rev, $2 version. Runs the consumer hook (which regenerates vendored files in
-  # FLAKE_ROOT) and captures its `name=value` stdout lines into `extra`.
+  # $1 rev, $2 version. Runs the consumer hook (which regenerates vendored files in FLAKE_ROOT) and captures its `name=value` stdout lines into `extra`.
   local rev="$1" v="$2" hook_out k val
   [[ -z "${ARTIFACT_HOOK}" ]] && return 0
   echo "Running artifact hook..."
@@ -135,8 +131,7 @@ run_artifact_hook() {
 }
 
 revalidate_hash() {
-  # $1 = pin field. Build; on a fixed-output hash mismatch, rewrite the field from
-  # nix's "got:" and rebuild. For vendor hashes that can't be prefetched.
+  # $1 = pin field. Build; on a fixed-output hash mismatch, rewrite the field from nix's "got:" and rebuild. For vendor hashes that can't be prefetched.
   local field="$1" out rc new
   echo "Validating ${field} via build..."
   set +e
@@ -155,11 +150,7 @@ revalidate_hash() {
 }
 
 source_pin_current() {
-  # $1 version, $2 rev. True (0) when pin.nix already matches at this version+rev with sourceHash
-  # and every EXTRA_HASHES field populated. Lets a no-op run skip the artifactHook + cascade
-  # regeneration (which can be non-deterministic, e.g. npm lockfiles) instead of churning the
-  # pin on every run. A placeholder pin (empty hash) returns false, so the populate path still
-  # runs; callers skip this in build-failure mode, where the hash can drift without a rev change.
+  # $1 version, $2 rev. True (0) when pin.nix already matches at this version+rev with sourceHash and every EXTRA_HASHES field populated. Lets a no-op run skip the artifactHook + cascade regeneration (which can be non-deterministic, e.g. npm lockfiles) instead of churning the pin on every run. A placeholder pin (empty hash) returns false, so the populate path still runs; callers skip this in build-failure mode, where the hash can drift without a rev change.
   local v="$1" rev="$2" cv crev csh name val
   cv=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
   crev=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
@@ -271,10 +262,7 @@ EOF
     ;;
 
   github-release-asset)
-    # A prebuilt release asset (single file), not the source tree: resolve the version like `github`
-    # (latest release tag, or the requested version), then prefetch-file the asset URL into a
-    # { version, hash } pin. No sourceRev — there is no tree to hash. Release assets are immutable,
-    # so a matching populated pin short-circuits before the (potentially large) download.
+    # A prebuilt release asset (single file), not the source tree: resolve the version like `github` (latest release tag, or the requested version), then prefetch-file the asset URL into a { version, hash } pin. No sourceRev — there is no tree to hash. Release assets are immutable, so a matching populated pin short-circuits before the (potentially large) download.
     if [[ -z "${GH_ASSET}" ]]; then
       echo "error: github-release-asset requires source.asset (GH_ASSET)" >&2
       exit 1

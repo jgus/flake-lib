@@ -1,11 +1,4 @@
-# High-level helper: a simple PyPI leaf flake collapses to one call.
-#   flake-lib.lib.mkLeafFlake {
-#     inherit nixpkgs flake-utils;
-#     source  = { type = "pypi"; pname = "iso639_lang"; format = "sdist"; };
-#     package = { attr = "iso639-lang"; description = "..."; };
-#     pin     = import ./pin.nix;
-#   }
-# Returns the full flake-utils eachDefaultSystem outputs set.
+# Assembles a leaf flake's per-system outputs (package, update-version, optional update-branches) from a source/package/pin spec.
 { mkPypiPackage, mkUpdateVersion, mkUpdateBranches }:
 { nixpkgs
 , flake-utils

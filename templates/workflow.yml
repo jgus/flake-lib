@@ -13,7 +13,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Set to the lowest upstream version this repo should track.
   MINIMUM_TRACKING_VERSION: "0.0.0"
 
 jobs:

@@ -2,8 +2,7 @@
 
 Usage: cascade.py <mode> <pypiName> <spec>
   mode "exact"   : spec is an exact pin (==X.Y.Z); print vX.Y.Z without querying PyPI.
-  mode "resolve" : query PyPI for the highest non-pre release satisfying spec; print
-                   vX.Y.Z for an == constraint, otherwise the vX.Y aggregate.
+  mode "resolve" : query PyPI for the highest non-pre release satisfying spec; print vX.Y.Z for an == constraint, otherwise the vX.Y aggregate.
 
 Prints nothing (exit 0) when it can't resolve, so the caller leaves the URL unchanged.
 """
@@ -40,7 +39,6 @@ if not candidates:
     sys.exit(0)
 
 top = max(candidates)
-# A literal == in the set means pin to that exact aggregate branch.
 if any(s.operator == "==" for s in spec):
     print(f"v{top.public}")
 else:

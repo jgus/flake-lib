@@ -1,6 +1,4 @@
 # Builds a PyPI-sourced python package (or application) from a pin + spec.
-# Covers the simple-leaf cases: sdist+setuptools, wheel, buildPythonApplication,
-# optional extra build-system / dependencies / passthru attrs.
 { pkgs, source, package, pin }:
 let
   inherit (pkgs) lib;
