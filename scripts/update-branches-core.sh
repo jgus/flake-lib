@@ -32,20 +32,37 @@ MIN_VERSION_COMPONENTS="${MIN_VERSION_COMPONENTS:-3}"
 FLAKE_ROOT="${FLAKE_ROOT:-${PWD}}"
 cd "${FLAKE_ROOT}"
 
+# Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream (e.g. gh --paginate failing between pages).
+retry() {
+  local attempt output
+  for attempt in 1 2 3 4 5; do
+    if output=$("$@"); then
+      [[ -z "${output}" ]] || printf '%s\n' "${output}"
+      return 0
+    fi
+    if (( attempt < 5 )); then
+      echo "  ${1} failed (attempt ${attempt}/5); retrying in 5s..." >&2
+      sleep 5
+    fi
+  done
+  echo "  ${1} failed after 5 attempts" >&2
+  return 1
+}
+
 list_upstream_versions() {
   case "${SOURCE_TYPE}" in
     pypi)
       # Only enumerate releases the flake can actually fetch: sdist -> a source tarball; wheel -> a universal py3-none-any wheel (the one mk-pypi-package builds). Releases lacking it are skipped.
       if [ "${PYPI_FORMAT:-sdist}" = "wheel" ]; then
-        curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" \
+        retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" \
           | jq -r '.releases | to_entries[] | select(.value | any(.packagetype == "bdist_wheel" and (.filename | endswith("-py3-none-any.whl")))) | .key'
       else
-        curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" \
+        retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" \
           | jq -r '.releases | to_entries[] | select(.value | any(.packagetype == "sdist")) | .key'
       fi
       ;;
     github | github-release-asset)
-      gh api --paginate "/repos/${GH_OWNER}/${GH_REPO}/releases" --jq '.[].tag_name'
+      retry gh api --paginate "/repos/${GH_OWNER}/${GH_REPO}/releases" --jq '.[].tag_name'
       ;;
     *)
       echo "error: update-branches does not support SOURCE_TYPE=${SOURCE_TYPE}" >&2
@@ -183,7 +200,7 @@ fi
 mapfile -t tracked < <(printf '%s\n' "${tracked[@]}" | sort -V)
 echo "Tracking ${#tracked[@]} upstream versions: ${tracked[*]}"
 
-git fetch --quiet origin
+git fetch --prune --quiet origin
 main_sha=$(git rev-parse --verify origin/main)
 
 declare -a failed=()
@@ -191,7 +208,7 @@ declare -a failed=()
 for v in "${tracked[@]}"; do
   branch="v${v}"
   wt=$(mktemp -d)
-  if git ls-remote --exit-code --heads origin "${branch}" >/dev/null 2>&1; then
+  if git rev-parse --verify --quiet "origin/${branch}" >/dev/null; then
     echo
     echo "=== Refreshing existing branch ${branch}"
     git fetch --quiet origin "${branch}:refs/remotes/origin/${branch}" || true
@@ -235,12 +252,12 @@ for v in "${tracked[@]}"; do
   git worktree remove --force "${wt}" >/dev/null
 done
 
-git fetch --quiet origin
+git fetch --prune --quiet origin
 declare -A agg_target_version=()
 record() { local key="$1" v="$2"; cur="${agg_target_version[$key]:-}"; if [[ -z "${cur}" ]] || version_lt "${cur}" "${v}"; then agg_target_version[$key]="${v}"; fi; }
 for v in "${tracked[@]}"; do
-  # Only consider exact branches that actually exist on origin (failed branches won't have a ref to advance aggregates to).
-  if ! git ls-remote --exit-code --heads origin "v${v}" >/dev/null 2>&1; then
+  # Only consider exact branches that actually exist on origin (failed branches won't have a ref to advance aggregates to). Checked against the just-pruned local refs, not via ls-remote — a transient network error misread as "absent" here would force-push aggregates backwards.
+  if ! git rev-parse --verify --quiet "origin/v${v}" >/dev/null; then
     continue
   fi
   # Aggregates only for levels shorter than the version's component count, so a short version's exact branch (e.g. v2 for tag "2") is never clobbered by an aggregate push.

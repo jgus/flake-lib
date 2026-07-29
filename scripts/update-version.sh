@@ -55,18 +55,57 @@ GITLAB_TRACK="${GITLAB_TRACK:-commit}"
 
 declare -A extra=()
 
+# Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream. The tag-spelling probes are wrapped at whole-sweep granularity (resolve_*_ref_sha) so an expected 404 on one candidate spelling is never individually retried.
+retry() {
+  local attempt output
+  for attempt in 1 2 3 4 5; do
+    if output=$("$@"); then
+      [[ -z "${output}" ]] || printf '%s\n' "${output}"
+      return 0
+    fi
+    if (( attempt < 5 )); then
+      echo "  ${1} failed (attempt ${attempt}/5); retrying in 5s..." >&2
+      sleep 5
+    fi
+  done
+  echo "  ${1} failed after 5 attempts" >&2
+  return 1
+}
+
 fetch_repo_file() {
   local path="$1" rev="$2" proj enc
   case "${SOURCE_TYPE}" in
     github)
-      gh api "/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${rev}" --jq '.content' | base64 -d
+      retry gh api "/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${rev}" --jq '.content' | base64 -d
       ;;
     gitlab)
       proj="${GITLAB_OWNER}%2F${GITLAB_REPO}"
       enc=$(jq -rn --arg p "${path}" '$p|@uri')
-      curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/files/${enc}/raw?ref=${rev}"
+      retry curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/files/${enc}/raw?ref=${rev}"
       ;;
   esac
+}
+
+resolve_github_ref_sha() {
+  local ref_base="$1" candidate sha
+  for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
+    if sha=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null) && [[ -n "${sha}" ]]; then
+      echo "${sha}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+resolve_gitlab_ref_sha() {
+  local proj="$1" ref_base="$2" candidate id
+  for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
+    if id=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${candidate}" 2>/dev/null | jq -r '.id // ""') && [[ -n "${id}" && "${id}" != "null" ]]; then
+      echo "${id}"
+      return 0
+    fi
+  done
+  return 1
 }
 
 resolve_and_rewrite_siblings() {
@@ -168,12 +207,12 @@ case "${SOURCE_TYPE}" in
     if [[ -n "${requested}" ]]; then
       new_version="${requested}"
     else
-      new_version=$(curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" | jq -r '.info.version')
+      new_version=$(retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" | jq -r '.info.version')
     fi
     cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
     cur_hash=$(nix eval --raw --file "${pin}" hash 2>/dev/null || echo "")
     echo "Resolving ${PYPI_NAME} ${new_version} on PyPI..."
-    rel=$(curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/${new_version}/json")
+    rel=$(retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/${new_version}/json")
     if [[ "${PYPI_FORMAT}" == "wheel" ]]; then
       # Prefer the universal py3-none-any wheel (what mk-pypi-package fetches); fall back to the first wheel.
       url=$(jq -r '([.urls[] | select(.packagetype == "bdist_wheel") | select(.filename | endswith("-py3-none-any.whl"))][0].url) // ([.urls[] | select(.packagetype == "bdist_wheel")][0].url)' <<<"${rel}")
@@ -202,11 +241,11 @@ EOF
   github)
     if [[ "${GH_TRACK}" == "commit" ]]; then
       if [[ -n "${requested}" ]]; then
-        commit=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${requested}")
+        commit=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${requested}")
       else
-        branch="${GH_BRANCH:-$(gh api "/repos/${GH_OWNER}/${GH_REPO}" --jq '.default_branch')}"
+        branch="${GH_BRANCH:-$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}" --jq '.default_branch')}"
         echo "Querying GitHub for latest commit on ${GH_OWNER}/${GH_REPO}@${branch}..."
-        commit=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${branch}")
+        commit=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${branch}")
       fi
       new_rev=$(jq -r '.sha' <<<"${commit}")
       new_version="0-unstable-$(jq -r '.commit.committer.date' <<<"${commit}" | cut -d'T' -f1)"
@@ -215,7 +254,7 @@ EOF
         new_version="${requested#[Vv]}"
       elif [[ "${GH_TRACK}" == "tag" ]]; then
         echo "Querying GitHub for latest tag of ${GH_OWNER}/${GH_REPO}..."
-        new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" --jq '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
+        new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" --jq '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
         new_version="${new_version#[Vv]}"
         if [[ -z "${new_version}" ]]; then
           echo "error: could not determine a version tag for ${GH_OWNER}/${GH_REPO}" >&2
@@ -223,18 +262,12 @@ EOF
         fi
       else
         echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
-        new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
+        new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
         new_version="${new_version#[Vv]}"
       fi
       ref_base="${requested_ref:-${new_version}}"
       ref_base="${ref_base#[Vv]}"
-      new_rev=""
-      for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
-        if sha=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${candidate}" --jq '.sha' 2>/dev/null); then
-          new_rev="${sha}"
-          break
-        fi
-      done
+      new_rev=$(retry resolve_github_ref_sha "${ref_base}" || true)
       if [[ -z "${new_rev}" ]]; then
         echo "error: could not resolve v${ref_base} / V${ref_base} / ${ref_base} on ${GH_OWNER}/${GH_REPO}" >&2
         exit 1
@@ -271,7 +304,7 @@ EOF
       new_version="${requested#[Vv]}"
     else
       echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
-      new_version=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
+      new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
       new_version="${new_version#[Vv]}"
     fi
     cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
@@ -306,7 +339,7 @@ EOF
         new_version="${requested#[Vv]}"
       else
         echo "Querying GitLab for latest tag of ${GITLAB_OWNER}/${GITLAB_REPO}..."
-        new_version=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/tags" | jq -r '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
+        new_version=$(retry curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/tags" | jq -r '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
         new_version="${new_version#[Vv]}"
       fi
       if [[ -z "${new_version}" ]]; then
@@ -315,22 +348,17 @@ EOF
       fi
       ref_base="${requested_ref:-${new_version}}"
       ref_base="${ref_base#[Vv]}"
-      new_rev=""
-      for candidate in "v${ref_base}" "V${ref_base}" "${ref_base}"; do
-        if id=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${candidate}" 2>/dev/null | jq -r '.id // ""'); then
-          if [[ -n "${id}" && "${id}" != "null" ]]; then new_rev="${id}"; break; fi
-        fi
-      done
+      new_rev=$(retry resolve_gitlab_ref_sha "${proj}" "${ref_base}" || true)
       if [[ -z "${new_rev}" ]]; then
         echo "error: could not resolve v${ref_base} / V${ref_base} / ${ref_base} on ${GITLAB_OWNER}/${GITLAB_REPO}" >&2
         exit 1
       fi
     else
       if [[ -n "${requested}" ]]; then
-        commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${requested}")
+        commit=$(retry curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/commits/${requested}")
       else
         echo "Querying GitLab for latest master commit of ${GITLAB_OWNER}/${GITLAB_REPO}..."
-        commit=$(curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/branches/master" | jq -r '.commit')
+        commit=$(retry curl -sSfL "https://gitlab.com/api/v4/projects/${proj}/repository/branches/master" | jq -r '.commit')
       fi
       new_rev=$(jq -r '.id' <<<"${commit}")
       new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)

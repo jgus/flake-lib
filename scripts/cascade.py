@@ -7,12 +7,38 @@ Usage: cascade.py <mode> <pypiName> <spec>
 Prints nothing (exit 0) when it can't resolve, so the caller leaves the URL unchanged.
 """
 
+import http.client
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
+
+RETRY_ATTEMPTS = 5
+RETRY_DELAY_S = 5
+
+
+def is_transient(status: int) -> bool:
+    return status >= 500 or status == 429
+
+
+def fetch_pypi_metadata(name: str) -> dict:
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/json", timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as e:
+            if not is_transient(e.code) or attempt == RETRY_ATTEMPTS:
+                raise
+        except (OSError, http.client.IncompleteRead):
+            if attempt == RETRY_ATTEMPTS:
+                raise
+        time.sleep(RETRY_DELAY_S)
+    raise RuntimeError("unreachable")
+
 
 mode, pypi_name, spec_str = sys.argv[1], sys.argv[2], sys.argv[3]
 spec = SpecifierSet(spec_str)
@@ -23,7 +49,7 @@ if mode == "exact":
         print(f"v{exacts[0]}")
     sys.exit(0)
 
-data = json.loads(urllib.request.urlopen(f"https://pypi.org/pypi/{pypi_name}/json").read())
+data = fetch_pypi_metadata(pypi_name)
 candidates = []
 for raw in data["releases"]:
     try:
