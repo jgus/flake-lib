@@ -9,6 +9,7 @@
 , siblings ? [ ]
 , hashMode ? "prefetch"
 , extraHashes ? [ ]
+, buildFailureHash ? if hashMode == "build-failure" then "sourceHash" else null
 , artifactHook ? null
 }:
 pkgs.writeShellApplication {
@@ -33,6 +34,8 @@ pkgs.writeShellApplication {
     BUILD_ATTR = buildAttr;
     HASH_MODE = hashMode;
     EXTRA_HASHES = builtins.toJSON extraHashes;
+    PIN_HASHES = builtins.toJSON (pkgs.lib.unique (extraHashes ++ pkgs.lib.optional (buildFailureHash != null && buildFailureHash != "sourceHash") buildFailureHash));
+    BUILD_FAILURE_HASH = if buildFailureHash == null then "" else buildFailureHash;
     ARTIFACT_HOOK = if artifactHook == null then "" else "${artifactHook}";
     SIBLINGS = builtins.toJSON siblings;
     CASCADE_PY = "${../scripts/cascade.py}";

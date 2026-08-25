@@ -18,7 +18,7 @@
 #   PYPI_NAME            [pypi]
 #   PYPI_FORMAT          sdist | wheel  [pypi]
 #   GH_OWNER/GH_REPO     [github, github-release-asset]
-#   PIN_SCHEMA           pypi | github | github-npm | github-yarn | github-asset | version-only
+#   PIN_SCHEMA           pypi | github | github-npm | github-pnpm | github-yarn | github-asset | version-only
 #   BRANCH_OWNED_FILES   space-separated files update-version mutates per branch
 #   VERSION_OVERRIDES    JSON map raw version -> canonical version
 #   VERSION_CANON        newline-separated `sed -E` rules mapping raw version -> canonical version
@@ -100,6 +100,17 @@ EOF
   sourceRev = "";
   sourceHash = "";
   npmDepsHash = "";
+}
+EOF
+      ;;
+    github-pnpm)
+      cat > pin.nix <<EOF
+# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
+{
+  version = "${v}";
+  sourceRev = "";
+  sourceHash = "";
+  pnpmDepsHash = "";
 }
 EOF
       ;;

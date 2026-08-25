@@ -26,6 +26,17 @@
           hashMode = "build-failure";
           extraHashes = [ "npmDepsHash" ];
         };
+        update-version-github-pnpm = lib.mkUpdateVersion {
+          inherit pkgs;
+          source = { type = "github"; owner = "example"; repo = "example"; };
+          buildAttr = "example";
+          buildFailureHash = "pnpmDepsHash";
+        };
+        update-branches-github-pnpm = lib.mkUpdateBranches {
+          inherit pkgs;
+          source = { type = "github"; owner = "example"; repo = "example"; };
+          pinSchema = "github-pnpm";
+        };
         revalidate-hash = lib.mkRevalidateHash { inherit pkgs; buildAttr = "example"; };
         # track="commit": default-branch HEAD becomes version 0-unstable-DATE.
         update-version-github-commit = lib.mkUpdateVersion {
@@ -40,9 +51,9 @@
         hookCheck = name: exe: pkgs.runCommand name { } "test -x ${exe} && touch $out";
       in
       {
-        packages = { inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash; };
+        packages = { inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-branches-github-pnpm revalidate-hash; };
         checks = {
-          inherit update-version update-branches update-version-github update-version-github-commit revalidate-hash;
+          inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-branches-github-pnpm revalidate-hash;
           npm-shipped-hook = hookCheck "npm-shipped-hook" npm-shipped-hook;
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;

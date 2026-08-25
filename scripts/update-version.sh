@@ -42,6 +42,8 @@ new_version=""
 # Optional seams (defaulted so simple pypi leaves need not set them):
 HASH_MODE="${HASH_MODE:-prefetch}"        # prefetch | build-failure (source/vendor hash)
 EXTRA_HASHES="${EXTRA_HASHES:-[]}"        # JSON array of extra pin field names (e.g. ["npmDepsHash"])
+PIN_HASHES="${PIN_HASHES:-${EXTRA_HASHES}}"
+BUILD_FAILURE_HASH="${BUILD_FAILURE_HASH:-}"
 ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored files, emit name=value extra hashes
 SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
 SIBLINGS="${SIBLINGS:-[]}"
@@ -146,7 +148,7 @@ write_source_pin() {
     echo "  version = \"${v}\";"
     echo "  sourceRev = \"${rev}\";"
     echo "  sourceHash = \"${h}\";"
-    for name in $(jq -r '.[]' <<<"${EXTRA_HASHES}"); do
+    for name in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
       echo "  ${name} = \"${extra[${name}]:-}\";"
     done
     echo "}"
@@ -195,7 +197,7 @@ source_pin_current() {
   crev=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
   csh=$(nix eval --raw --file "${pin}" sourceHash 2>/dev/null || echo "")
   [[ "${cv}" == "${v}" && "${crev}" == "${rev}" && -n "${csh}" ]] || return 1
-  for name in $(jq -r '.[]' <<<"${EXTRA_HASHES}"); do
+  for name in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
     val=$(nix eval --raw --file "${pin}" "${name}" 2>/dev/null || echo "")
     [[ -n "${val}" ]] || return 1
   done
@@ -287,7 +289,9 @@ EOF
     echo "Writing pin.nix (-> ${new_version})..."
     write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
     pin_changed=1
-    [[ "${HASH_MODE}" == "build-failure" ]] && revalidate_hash sourceHash
+    if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
+      revalidate_hash "${BUILD_FAILURE_HASH}"
+    fi
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_siblings "${new_rev}"
@@ -378,7 +382,9 @@ EOF
     echo "Writing pin.nix (-> ${new_version})..."
     write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
     pin_changed=1
-    [[ "${HASH_MODE}" == "build-failure" ]] && revalidate_hash sourceHash
+    if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
+      revalidate_hash "${BUILD_FAILURE_HASH}"
+    fi
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_siblings "${new_rev}"

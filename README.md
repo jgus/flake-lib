@@ -19,7 +19,7 @@ flake-lib.lib.mkLeafFlake {
 # => packages.<system> = { <attr>; update-version; update-branches; default; }
 
 # Low-level: bespoke flakes supply their own package derivation.
-flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; hashMode ? "prefetch"; extraHashes ? []; artifactHook ? null; }
+flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; hashMode ? "prefetch"; extraHashes ? []; buildFailureHash ? null; artifactHook ? null; }
 flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; minVersionComponents ? 3; }
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
 flake-lib.lib.mkRevalidateHash { pkgs; buildAttr; hashField ? "hash"; }
@@ -49,6 +49,12 @@ source = {
 The update machinery and the orchestrator's per-flake bits
 (`list_upstream_versions`, `write_placeholder_pin`, the sibling-cascade URL
 rewrite) are all driven from that spec.
+
+`buildFailureHash` names one additional pin field whose value is populated from
+the package build's fixed-output hash mismatch. This supports dependency fetchers
+such as `fetchPnpmDeps` while the source tree continues to use normal prefetching.
+Use `pinSchema = "github-pnpm"` for the corresponding `{ version, sourceRev,
+sourceHash, pnpmDepsHash }` branch placeholders.
 
 `templates/` holds `gitattributes` and `workflow.yml`, which a consuming repo installs as `.gitattributes` and `.github/workflows/update.yml`.
 
