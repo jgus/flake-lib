@@ -31,6 +31,9 @@ pkgs.writeShellApplication {
     GITLAB_OWNER = source.owner or "";
     GITLAB_REPO = source.repo or "";
     GITLAB_TRACK = source.track or "commit"; # release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)
+    HF_REPO = if source.type == "huggingface" then source.repo else "";
+    HF_REVISION = source.revision or "main";
+    HF_FILES = builtins.toJSON (source.files or [ ]);
     BUILD_ATTR = buildAttr;
     HASH_MODE = hashMode;
     EXTRA_HASHES = builtins.toJSON extraHashes;

@@ -31,7 +31,7 @@ flake-lib.lib.mkComposedHook   { pkgs; hooks; }
 flake-lib.lib.warnIfNewerMajor { pkgs; name; lib ? pkgs.lib; }
 ```
 
-`source.type` is `pypi`, `github`, `github-release-asset`, or `gitlab`. `github`
+`source.type` is `pypi`, `github`, `github-release-asset`, `huggingface`, or `gitlab`. `github`
 hashes the source *tree* at a release tag (`{ version, sourceRev, sourceHash }`);
 `github-release-asset` instead prefetches a single prebuilt release asset into a
 `{ version, hash }` pin (`pinSchema = "github-asset"`), for upstreams shipped as a
@@ -43,6 +43,18 @@ source = {
   owner = "Suwayomi"; repo = "Suwayomi-Server";
   asset = "Suwayomi-Server-v\${version}.jar";  # tokens: \${version} (tag minus leading v), \${tag}
   # tag = "\${version}";                        # optional; default "v\${version}"
+};
+```
+
+`huggingface` tracks a model repository revision and writes a `{ version,
+sourceRev }` pin. An optional `files` list adds a `hashes` attribute containing
+the Nix content hash of each selected repository file:
+
+```nix
+source = {
+  type = "huggingface";
+  repo = "BAAI/bge-reranker-v2-m3";
+  files = [ "config.json" "model.safetensors" ];
 };
 ```
 

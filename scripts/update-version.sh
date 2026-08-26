@@ -1,7 +1,7 @@
 #!/usr/bin/env -S nix shell nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#nix nixpkgs#gh nixpkgs#gnused nixpkgs#nix-prefetch-github nixpkgs#nix-prefetch-git nixpkgs#coreutils --command bash
 
 # Generic update-version for jgus sub-flakes, driven by env vars injected by flake-lib's mkUpdateVersion:
-#   SOURCE_TYPE   pypi | github | github-release-asset | gitlab
+#   SOURCE_TYPE   pypi | github | github-release-asset | gitlab | huggingface
 #   PYPI_NAME     PyPI distribution name (underscore form)   [pypi]
 #   PYPI_FORMAT   sdist | wheel                              [pypi]
 #   GH_OWNER/GH_REPO          GitHub owner/repo              [github, github-release-asset]
@@ -54,8 +54,12 @@ GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with 
 GH_ASSET="${GH_ASSET:-}"
 GH_TAG="${GH_TAG:-}"
 GITLAB_TRACK="${GITLAB_TRACK:-commit}"
+HF_REPO="${HF_REPO:-}"
+HF_REVISION="${HF_REVISION:-main}"
+HF_FILES="${HF_FILES:-[]}"
 
 declare -A extra=()
+declare -A HF_HASHES=()
 
 # Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream. The tag-spelling probes are wrapped at whole-sweep granularity (resolve_*_ref_sha) so an expected 404 on one candidate spelling is never individually retried.
 retry() {
@@ -153,6 +157,41 @@ write_source_pin() {
     done
     echo "}"
   } > "${pin}"
+}
+
+write_huggingface_pin() {
+  local VERSION="${1}" REV="${2}" FILE FILE_LITERAL HASH_LITERAL
+  {
+    echo "{"
+    echo "  version = \"${VERSION}\";"
+    echo "  sourceRev = \"${REV}\";"
+    if [[ "$(jq 'length' <<<"${HF_FILES}")" -gt 0 ]]; then
+      echo "  hashes = {"
+      while IFS= read -r FILE; do
+        FILE_LITERAL=$(jq -Rn --arg VALUE "${FILE}" '$VALUE')
+        HASH_LITERAL=$(jq -Rn --arg VALUE "${HF_HASHES[${FILE}]}" '$VALUE')
+        printf '    %s = %s;\n' "${FILE_LITERAL}" "${HASH_LITERAL}"
+      done < <(jq -r '.[]' <<<"${HF_FILES}")
+      echo "  };"
+    fi
+    echo "}"
+  } > "${pin}"
+}
+
+huggingface_pin_current() {
+  local VERSION="${1}" REV="${2}" CURRENT_VERSION CURRENT_REV CURRENT_HASHES CURRENT_FILES EXPECTED_FILES FILE HASH
+  CURRENT_VERSION=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
+  CURRENT_REV=$(nix eval --raw --file "${pin}" sourceRev 2>/dev/null || echo "")
+  [[ "${CURRENT_VERSION}" == "${VERSION}" && "${CURRENT_REV}" == "${REV}" ]] || return 1
+  CURRENT_HASHES=$(nix eval --json --file "${pin}" hashes 2>/dev/null || echo '{}')
+  CURRENT_FILES=$(jq -c 'keys | sort' <<<"${CURRENT_HASHES}")
+  EXPECTED_FILES=$(jq -c 'sort' <<<"${HF_FILES}")
+  [[ "${CURRENT_FILES}" == "${EXPECTED_FILES}" ]] || return 1
+  while IFS= read -r FILE; do
+    HASH=$(jq -r --arg FILE "${FILE}" '.[$FILE] // ""' <<<"${CURRENT_HASHES}")
+    [[ -n "${HASH}" ]] || return 1
+  done < <(jq -r '.[]' <<<"${HF_FILES}")
+  return 0
 }
 
 run_artifact_hook() {
@@ -333,6 +372,35 @@ EOF
   hash = "${new_hash}";
 }
 EOF
+    pin_changed=1
+    ;;
+
+  huggingface)
+    if [[ -z "${HF_REPO}" ]]; then
+      echo "error: huggingface requires source.repo (HF_REPO)" >&2
+      exit 1
+    fi
+    HF_REF="${requested:-${HF_REVISION}}"
+    echo "Querying Hugging Face for ${HF_REPO}@${HF_REF}..."
+    HF_METADATA=$(retry curl -sSfL "https://huggingface.co/api/models/${HF_REPO}/revision/${HF_REF}")
+    HF_REV=$(jq -r '.sha // ""' <<<"${HF_METADATA}")
+    HF_DATE=$(jq -r '.lastModified // ""' <<<"${HF_METADATA}" | cut -d'T' -f1)
+    if [[ -z "${HF_REV}" || -z "${HF_DATE}" || "${HF_REV}" == "null" || "${HF_DATE}" == "null" ]]; then
+      echo "error: could not resolve ${HF_REPO}@${HF_REF}" >&2
+      exit 1
+    fi
+    new_version="0-unstable-${HF_DATE}"
+    if huggingface_pin_current "${new_version}" "${HF_REV}"; then
+      echo "Already up to date (${new_version})."
+      exit 0
+    fi
+    while IFS= read -r HF_FILE; do
+      HF_FILE_URL=$(jq -rn --arg VALUE "${HF_FILE}" '$VALUE | split("/") | map(@uri) | join("/")')
+      echo "Prefetching ${HF_FILE}..."
+      HF_HASHES["${HF_FILE}"]=$(nix store prefetch-file --json --hash-type sha256 "https://huggingface.co/${HF_REPO}/resolve/${HF_REV}/${HF_FILE_URL}" | jq -r '.hash')
+    done < <(jq -r '.[]' <<<"${HF_FILES}")
+    echo "Writing pin.nix (-> ${new_version})..."
+    write_huggingface_pin "${new_version}" "${HF_REV}"
     pin_changed=1
     ;;
 

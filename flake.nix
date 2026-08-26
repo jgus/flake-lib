@@ -44,6 +44,11 @@
           source = { type = "github"; owner = "example"; repo = "example"; track = "commit"; };
           buildAttr = "example";
         };
+        update-version-huggingface = lib.mkUpdateVersion {
+          inherit pkgs;
+          source = { type = "huggingface"; repo = "example/model"; files = [ "config.json" ]; };
+          buildAttr = "model";
+        };
         npm-shipped-hook = lib.mkJsDepsHook { inherit pkgs; manager = "npm"; fetcherVersion = 2; };
         npm-generated-hook = lib.mkJsDepsHook { inherit pkgs; manager = "npm"; source = "generated"; };
         yarn-hook = lib.mkJsDepsHook { inherit pkgs; manager = "yarn"; };
@@ -51,9 +56,9 @@
         hookCheck = name: exe: pkgs.runCommand name { } "test -x ${exe} && touch $out";
       in
       {
-        packages = { inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-branches-github-pnpm revalidate-hash; };
+        packages = { inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
         checks = {
-          inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-branches-github-pnpm revalidate-hash;
+          inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash;
           npm-shipped-hook = hookCheck "npm-shipped-hook" npm-shipped-hook;
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
