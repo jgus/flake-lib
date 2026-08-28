@@ -62,6 +62,31 @@ HF_FILES="${HF_FILES:-[]}"
 declare -A extra=()
 declare -A HF_HASHES=()
 
+write_pypi_pin() {
+  local VERSION="${1}" HASH="${2}" NAME
+  {
+    echo "{"
+    echo "  version = \"${VERSION}\";"
+    echo "  hash = \"${HASH}\";"
+    for NAME in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
+      echo "  ${NAME} = \"${extra[${NAME}]:-}\";"
+    done
+    echo "}"
+  } > "${pin}"
+}
+
+pypi_pin_current() {
+  local VERSION="${1}" HASH="${2}" CURRENT_VERSION CURRENT_HASH NAME VALUE
+  CURRENT_VERSION=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
+  CURRENT_HASH=$(nix eval --raw --file "${pin}" hash 2>/dev/null || echo "")
+  [[ "${CURRENT_VERSION}" == "${VERSION}" && "${CURRENT_HASH}" == "${HASH}" ]] || return 1
+  for NAME in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
+    VALUE=$(nix eval --raw --file "${pin}" "${NAME}" 2>/dev/null || echo "")
+    [[ -n "${VALUE}" ]] || return 1
+  done
+  return 0
+}
+
 # Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream. The tag-spelling probes are wrapped at whole-sweep granularity (resolve_*_ref_sha) so an expected 404 on one candidate spelling is never individually retried.
 retry() {
   local attempt output
@@ -280,7 +305,6 @@ case "${SOURCE_TYPE}" in
       new_version=$(retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/json" | jq -r '.info.version')
     fi
     cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
-    cur_hash=$(nix eval --raw --file "${pin}" hash 2>/dev/null || echo "")
     echo "Resolving ${PYPI_NAME} ${new_version} on PyPI..."
     rel=$(retry curl -sSfL "https://pypi.org/pypi/${PYPI_NAME}/${new_version}/json")
     if [[ "${PYPI_FORMAT}" == "wheel" ]]; then
@@ -298,7 +322,7 @@ case "${SOURCE_TYPE}" in
       echo "Resolving sibling cascades..."
       resolve_and_rewrite_pypi_siblings "${rel}"
     fi
-    if [[ "${cur_version}" == "${new_version}" && "${cur_hash}" == "${new_hash}" ]]; then
+    if pypi_pin_current "${new_version}" "${new_hash}"; then
       if (( CASCADE_CHANGED == 0 )); then
         echo "Already up to date (${cur_version})."
         exit 0
@@ -306,13 +330,11 @@ case "${SOURCE_TYPE}" in
       echo "Source pin already up to date (${cur_version})."
     else
       echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
-      cat > "${pin}" <<EOF
-{
-  version = "${new_version}";
-  hash = "${new_hash}";
-}
-EOF
+      write_pypi_pin "${new_version}" "${new_hash}"
       pin_changed=1
+      if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
+        revalidate_hash "${BUILD_FAILURE_HASH}"
+      fi
     fi
     ;;
 

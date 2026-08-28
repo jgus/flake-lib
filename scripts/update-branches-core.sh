@@ -72,15 +72,20 @@ list_upstream_versions() {
 }
 
 write_placeholder_pin() {
-  local v="$1"
+  local v="$1" EXTRA_HASH
   case "${PIN_SCHEMA}" in
     pypi)
-      cat > pin.nix <<EOF
+      {
+        cat <<EOF
 {
   version = "${v}";
   hash = "";
-}
 EOF
+        for EXTRA_HASH in $(jq -r '.[]' <<<"${EXTRA_HASHES:-[]}"); do
+          echo "  ${EXTRA_HASH} = \"\";"
+        done
+        echo "}"
+      } > pin.nix
       ;;
     github)
       cat > pin.nix <<EOF
