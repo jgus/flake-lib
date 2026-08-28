@@ -199,16 +199,24 @@ for v in "${raw_versions[@]}"; do
 done
 
 declare -a tracked=()
-for v in "${all_versions[@]}"; do
-  if ! version_lt "${v}" "${MINIMUM_TRACKING_VERSION}"; then
-    tracked+=("${v}")
+if [[ "${SOURCE_TYPE}" == "pypi" ]]; then
+  PYPI_SORT_MODE="all"
+  if [[ -n "${EXCLUDE_PRERELEASES:-}" ]]; then
+    PYPI_SORT_MODE="stable"
   fi
-done
+  mapfile -t tracked < <(printf '%s\n' "${all_versions[@]}" | python3 "${CASCADE_PY}" sort "${MINIMUM_TRACKING_VERSION}" "${PYPI_SORT_MODE}")
+else
+  for v in "${all_versions[@]}"; do
+    if ! version_lt "${v}" "${MINIMUM_TRACKING_VERSION}"; then
+      tracked+=("${v}")
+    fi
+  done
+  mapfile -t tracked < <(printf '%s\n' "${tracked[@]}" | sort -V)
+fi
 if (( ${#tracked[@]} == 0 )); then
   echo "No upstream versions >= ${MINIMUM_TRACKING_VERSION}; nothing to do."
   exit 0
 fi
-mapfile -t tracked < <(printf '%s\n' "${tracked[@]}" | sort -V)
 echo "Tracking ${#tracked[@]} upstream versions: ${tracked[*]}"
 
 git fetch --prune --quiet origin
@@ -265,8 +273,12 @@ done
 
 git fetch --prune --quiet origin
 declare -A agg_target_version=()
-record() { local key="$1" v="$2"; cur="${agg_target_version[$key]:-}"; if [[ -z "${cur}" ]] || version_lt "${cur}" "${v}"; then agg_target_version[$key]="${v}"; fi; }
-for v in "${tracked[@]}"; do
+record() { local KEY="${1}" VERSION="${2}"; agg_target_version[${KEY}]="${VERSION}"; }
+declare -a aggregate_versions=("${tracked[@]}")
+if [[ "${SOURCE_TYPE}" == "pypi" && -z "${INCLUDE_PRERELEASE_AGGREGATES:-}" ]]; then
+  mapfile -t aggregate_versions < <(printf '%s\n' "${tracked[@]}" | python3 "${CASCADE_PY}" sort "${MINIMUM_TRACKING_VERSION}" stable)
+fi
+for v in "${aggregate_versions[@]}"; do
   # Only consider exact branches that actually exist on origin (failed branches won't have a ref to advance aggregates to). Checked against the just-pruned local refs, not via ls-remote — a transient network error misread as "absent" here would force-push aggregates backwards.
   if ! git rev-parse --verify --quiet "origin/v${v}" >/dev/null; then
     continue

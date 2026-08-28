@@ -20,7 +20,7 @@ flake-lib.lib.mkLeafFlake {
 
 # Low-level: bespoke flakes supply their own package derivation.
 flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; hashMode ? "prefetch"; extraHashes ? []; buildFailureHash ? null; artifactHook ? null; }
-flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; minVersionComponents ? 3; }
+flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; includePrereleaseAggregates ? false; minVersionComponents ? 3; }
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
 flake-lib.lib.mkRevalidateHash { pkgs; buildAttr; hashField ? "hash"; }
 flake-lib.lib.mkJsDepsHook     { pkgs; manager; source ? "shipped"; field ? null; fetcherVersion ? null; }
@@ -61,6 +61,8 @@ source = {
 The update machinery and the orchestrator's per-flake bits
 (`list_upstream_versions`, `write_placeholder_pin`, the sibling-cascade URL
 rewrite) are all driven from that spec.
+
+PyPI producers resolve sibling requirements from their release metadata. Exact pins select exact branches, unbounded minimums select `main`, and bounded ranges select a compatible aggregate. PyPI prerelease branches remain available as exact history but do not advance aggregate branches unless `includePrereleaseAggregates` is enabled.
 
 `buildFailureHash` names one additional pin field whose value is populated from
 the package build's fixed-output hash mismatch. This supports dependency fetchers
