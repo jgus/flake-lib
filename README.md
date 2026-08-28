@@ -20,7 +20,7 @@ flake-lib.lib.mkLeafFlake {
 
 # Low-level: bespoke flakes supply their own package derivation.
 flake-lib.lib.mkUpdateVersion  { pkgs; source; buildAttr; siblings ? []; hashMode ? "prefetch"; extraHashes ? []; buildFailureHash ? null; artifactHook ? null; }
-flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; includePrereleaseAggregates ? false; minVersionComponents ? 3; }
+flake-lib.lib.mkUpdateBranches { pkgs; source; pinSchema; branchOwnedFiles ? [ "pin.nix" "flake.lock" ]; extraHashes ? []; versionOverrides ? {}; versionCanon ? []; excludePrereleases ? false; includePrereleaseAggregates ? false; minVersionComponents ? 3; }
 flake-lib.lib.mkPypiPackage    { pkgs; source; package; pin; }
 flake-lib.lib.mkRevalidateHash { pkgs; buildAttr; hashField ? "hash"; }
 flake-lib.lib.mkJsDepsHook     { pkgs; manager; source ? "shipped"; field ? null; fetcherVersion ? null; }
@@ -67,6 +67,8 @@ PyPI producers resolve sibling requirements from their release metadata. Exact p
 `buildFailureHash` names one additional pin field whose value is populated from
 the package build's fixed-output hash mismatch. This supports dependency fetchers
 such as `fetchPnpmDeps` while the source tree continues to use normal prefetching.
+For PyPI sources, pass the same field through `mkUpdateBranches.extraHashes` so
+new version branches include it in their placeholder pins.
 Use `pinSchema = "github-pnpm"` for the corresponding `{ version, sourceRev,
 sourceHash, pnpmDepsHash }` branch placeholders.
 

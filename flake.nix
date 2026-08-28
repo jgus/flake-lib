@@ -19,6 +19,18 @@
         exampleSource = { type = "pypi"; pname = "iso639_lang"; format = "sdist"; };
         update-version = lib.mkUpdateVersion { inherit pkgs; source = exampleSource; buildAttr = "iso639-lang"; };
         update-branches = lib.mkUpdateBranches { inherit pkgs; source = exampleSource; pinSchema = "pypi"; };
+        update-version-pypi-cargo = lib.mkUpdateVersion {
+          inherit pkgs;
+          source = exampleSource;
+          buildAttr = "example";
+          buildFailureHash = "cargoHash";
+        };
+        update-branches-pypi-cargo = lib.mkUpdateBranches {
+          inherit pkgs;
+          source = exampleSource;
+          pinSchema = "pypi";
+          extraHashes = [ "cargoHash" ];
+        };
         update-version-github = lib.mkUpdateVersion {
           inherit pkgs;
           source = { type = "github"; owner = "example"; repo = "example"; };
@@ -64,9 +76,9 @@
         '';
       in
       {
-        packages = { inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
+        packages = { inherit update-version update-branches update-version-pypi-cargo update-branches-pypi-cargo update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
         checks = {
-          inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash;
+          inherit update-version update-branches update-version-pypi-cargo update-branches-pypi-cargo update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash;
           npm-shipped-hook = hookCheck "npm-shipped-hook" npm-shipped-hook;
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
