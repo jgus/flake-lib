@@ -54,6 +54,14 @@
         yarn-hook = lib.mkJsDepsHook { inherit pkgs; manager = "yarn"; };
         composed-hook = lib.mkComposedHook { inherit pkgs; hooks = [ npm-generated-hook yarn-hook ]; };
         hookCheck = name: exe: pkgs.runCommand name { } "test -x ${exe} && touch $out";
+        cascade-tests = pkgs.runCommand "cascade-tests"
+          {
+            nativeBuildInputs = [ (pkgs.python3.withPackages (pythonPackages: [ pythonPackages.packaging ])) ];
+            CASCADE_PY = ./scripts/cascade.py;
+          } ''
+          python3 ${./tests/test_cascade.py}
+          touch $out
+        '';
       in
       {
         packages = { inherit update-version update-branches update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
@@ -63,6 +71,7 @@
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
           composed-hook = hookCheck "composed-hook" composed-hook;
+          inherit cascade-tests;
         };
       });
 }

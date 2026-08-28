@@ -38,6 +38,7 @@ requested="${1:-}"
 requested_ref="${2:-}"
 pin_changed=0
 new_version=""
+CASCADE_CHANGED=0
 
 # Optional seams (defaulted so simple pypi leaves need not set them):
 HASH_MODE="${HASH_MODE:-prefetch}"        # prefetch | build-failure (source/vendor hash)
@@ -114,6 +115,16 @@ resolve_gitlab_ref_sha() {
   return 1
 }
 
+rewrite_sibling_url() {
+  local FLAKE_REPO="${1}" REF="${2}" BEFORE AFTER
+  BEFORE=$(sha256sum "${flake}")
+  sed -i -E "s|(url = \"github:${FLAKE_REPO})(/[^\"]*)?(\")|\\1/${REF}\\3|" "${flake}"
+  AFTER=$(sha256sum "${flake}")
+  if [[ "${BEFORE}" != "${AFTER}" ]]; then
+    CASCADE_CHANGED=1
+  fi
+}
+
 resolve_and_rewrite_siblings() {
   # $1 = source rev to read requirements at. Rewrites flake.nix sibling URLs in place.
   local rev="$1" n i reqName pypiName flakeRepo mode reqFile spec ref req_text
@@ -140,7 +151,25 @@ resolve_and_rewrite_siblings() {
       continue
     fi
     echo "  ${reqName} ${spec} -> github:${flakeRepo}/${ref}"
-    sed -i -E "s|(url = \"github:${flakeRepo})(/[^\"]*)?(\")|\\1/${ref}\\3|" "${flake}"
+    rewrite_sibling_url "${flakeRepo}" "${ref}"
+  done
+}
+
+resolve_and_rewrite_pypi_siblings() {
+  local METADATA="${1}" COUNT INDEX REQUIREMENT_NAME PYPI_NAME FLAKE_REPO MODE REF
+  COUNT=$(jq 'length' <<<"${SIBLINGS}")
+  for (( INDEX = 0; INDEX < COUNT; INDEX++ )); do
+    REQUIREMENT_NAME=$(jq -r ".[${INDEX}].reqName" <<<"${SIBLINGS}")
+    PYPI_NAME=$(jq -r ".[${INDEX}].pypiName // \"\"" <<<"${SIBLINGS}")
+    FLAKE_REPO=$(jq -r ".[${INDEX}].flakeRepo" <<<"${SIBLINGS}")
+    MODE=$(jq -r ".[${INDEX}].mode // \"resolve\"" <<<"${SIBLINGS}")
+    REF=$(python3 "${CASCADE_PY}" metadata "${REQUIREMENT_NAME}" "${PYPI_NAME}" "${MODE}" <<<"${METADATA}" || true)
+    if [[ -z "${REF}" ]]; then
+      echo "warning: no applicable ${REQUIREMENT_NAME} requirement could be resolved; ${FLAKE_REPO} URL left unchanged." >&2
+      continue
+    fi
+    echo "  ${REQUIREMENT_NAME} -> github:${FLAKE_REPO}/${REF}"
+    rewrite_sibling_url "${FLAKE_REPO}" "${REF}"
   done
 }
 
@@ -265,18 +294,26 @@ case "${SOURCE_TYPE}" in
       exit 1
     fi
     new_hash=$(nix store prefetch-file --json --hash-type sha256 "${url}" | jq -r '.hash')
-    if [[ "${cur_version}" == "${new_version}" && "${cur_hash}" == "${new_hash}" ]]; then
-      echo "Already up to date (${cur_version})."
-      exit 0
+    if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
+      echo "Resolving sibling cascades..."
+      resolve_and_rewrite_pypi_siblings "${rel}"
     fi
-    echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
-    cat > "${pin}" <<EOF
+    if [[ "${cur_version}" == "${new_version}" && "${cur_hash}" == "${new_hash}" ]]; then
+      if (( CASCADE_CHANGED == 0 )); then
+        echo "Already up to date (${cur_version})."
+        exit 0
+      fi
+      echo "Source pin already up to date (${cur_version})."
+    else
+      echo "Writing pin.nix (${cur_version:-<none>} -> ${new_version})..."
+      cat > "${pin}" <<EOF
 {
   version = "${new_version}";
   hash = "${new_hash}";
 }
 EOF
-    pin_changed=1
+      pin_changed=1
+    fi
     ;;
 
   github)
@@ -314,7 +351,11 @@ EOF
         exit 1
       fi
     fi
-    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+    if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
+      echo "Resolving sibling cascades..."
+      resolve_and_rewrite_siblings "${new_rev}"
+    fi
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}" && (( CASCADE_CHANGED == 0 )); then
       echo "Already up to date (${new_version})."
       exit 0
     fi
@@ -330,10 +371,6 @@ EOF
     pin_changed=1
     if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
       revalidate_hash "${BUILD_FAILURE_HASH}"
-    fi
-    if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
-      echo "Resolving sibling cascades..."
-      resolve_and_rewrite_siblings "${new_rev}"
     fi
     ;;
 
@@ -436,7 +473,11 @@ EOF
       new_date=$(jq -r '.committed_date' <<<"${commit}" | cut -d'T' -f1)
       new_version="0-unstable-${new_date}"
     fi
-    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+    if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
+      echo "Resolving sibling cascades..."
+      resolve_and_rewrite_siblings "${new_rev}"
+    fi
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}" && (( CASCADE_CHANGED == 0 )); then
       echo "Already up to date (${new_version})."
       exit 0
     fi
@@ -452,10 +493,6 @@ EOF
     pin_changed=1
     if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
       revalidate_hash "${BUILD_FAILURE_HASH}"
-    fi
-    if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
-      echo "Resolving sibling cascades..."
-      resolve_and_rewrite_siblings "${new_rev}"
     fi
     ;;
 
