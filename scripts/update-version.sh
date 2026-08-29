@@ -15,8 +15,6 @@
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
 #   CASCADE_PY    path to cascade.py (python3+packaging supplied via runtimeInputs)
 #
-# Pins pin.nix (and, for cascades, the sibling URLs in flake.nix) to a specific or latest upstream release, re-validating every hash. Idempotent: a no-op when nothing changed.
-#
 #   nix run .#update-version            # latest upstream
 #   nix run .#update-version -- X.Y.Z   # specific version / ref
 #
@@ -39,6 +37,7 @@ requested_ref="${2:-}"
 pin_changed=0
 new_version=""
 CASCADE_CHANGED=0
+LOCK_CHANGED=0
 
 # Optional seams (defaulted so simple pypi leaves need not set them):
 HASH_MODE="${HASH_MODE:-prefetch}"        # prefetch | build-failure (source/vendor hash)
@@ -48,6 +47,7 @@ BUILD_FAILURE_HASH="${BUILD_FAILURE_HASH:-}"
 ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored files, emit name=value extra hashes
 SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
 SIBLINGS="${SIBLINGS:-[]}"
+SIBLING_REFS_IN_PIN="${SIBLING_REFS_IN_PIN:-}"
 CASCADE_PY="${CASCADE_PY:-}"
 GH_TRACK="${GH_TRACK:-release}"
 GH_BRANCH="${GH_BRANCH:-}"
@@ -61,6 +61,21 @@ HF_FILES="${HF_FILES:-[]}"
 
 declare -A extra=()
 declare -A HF_HASHES=()
+RESOLVED_SIBLING_REFS='{}'
+
+write_sibling_refs() {
+  [[ -z "${SIBLING_REFS_IN_PIN}" ]] && return 0
+  echo "  dependencies = {"
+  jq -r 'to_entries[] | "    " + (.key | tojson) + " = " + (.value | tojson) + ";"' <<<"${RESOLVED_SIBLING_REFS}"
+  echo "  };"
+}
+
+sibling_refs_current() {
+  [[ -z "${SIBLING_REFS_IN_PIN}" ]] && return 0
+  local CURRENT_REFS
+  CURRENT_REFS=$(nix eval --json --file "${pin}" dependencies 2>/dev/null || echo '{}')
+  [[ "$(jq -cS . <<<"${CURRENT_REFS}")" == "$(jq -cS . <<<"${RESOLVED_SIBLING_REFS}")" ]]
+}
 
 write_pypi_pin() {
   local VERSION="${1}" HASH="${2}" NAME
@@ -71,6 +86,7 @@ write_pypi_pin() {
     for NAME in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
       echo "  ${NAME} = \"${extra[${NAME}]:-}\";"
     done
+    write_sibling_refs
     echo "}"
   } > "${pin}"
 }
@@ -84,7 +100,7 @@ pypi_pin_current() {
     VALUE=$(nix eval --raw --file "${pin}" "${NAME}" 2>/dev/null || echo "")
     [[ -n "${VALUE}" ]] || return 1
   done
-  return 0
+  sibling_refs_current
 }
 
 # Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream. The tag-spelling probes are wrapped at whole-sweep granularity (resolve_*_ref_sha) so an expected 404 on one candidate spelling is never individually retried.
@@ -150,12 +166,43 @@ rewrite_sibling_url() {
   fi
 }
 
-resolve_and_rewrite_siblings() {
-  # $1 = source rev to read requirements at. Rewrites flake.nix sibling URLs in place.
-  local REV="${1}" COUNT INDEX REQUIREMENT_NAME PYPI_NAME FLAKE_REPO MODE REQUIREMENT_FILE REQUIREMENT_FORMAT REQUIREMENT_GROUPS REF REQUIREMENT_TEXT
+apply_sibling_ref() {
+  local INPUT_NAME="${1}" FLAKE_REPO="${2}" REF="${3}"
+  if [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+    RESOLVED_SIBLING_REFS=$(jq -c --arg NAME "${INPUT_NAME}" --arg REF "${REF}" '. + {($NAME): $REF}' <<<"${RESOLVED_SIBLING_REFS}")
+  else
+    rewrite_sibling_url "${FLAKE_REPO}" "${REF}"
+  fi
+}
+
+update_flake_lock() {
+  local BEFORE="" AFTER COUNT INDEX INPUT_NAME FLAKE_REPO REF
+  local -a OVERRIDE_ARGS=()
+  if [[ -f "${FLAKE_ROOT}/flake.lock" ]]; then
+    BEFORE=$(sha256sum "${FLAKE_ROOT}/flake.lock")
+  fi
+  if [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+    COUNT=$(jq 'length' <<<"${SIBLINGS}")
+    for (( INDEX = 0; INDEX < COUNT; INDEX++ )); do
+      INPUT_NAME=$(jq -r ".[${INDEX}].inputName // .[${INDEX}].reqName" <<<"${SIBLINGS}")
+      FLAKE_REPO=$(jq -r ".[${INDEX}].flakeRepo" <<<"${SIBLINGS}")
+      REF=$(jq -r --arg NAME "${INPUT_NAME}" '.[$NAME]' <<<"${RESOLVED_SIBLING_REFS}")
+      OVERRIDE_ARGS+=(--override-input "${INPUT_NAME}" "github:${FLAKE_REPO}/${REF}")
+    done
+  fi
+  nix flake lock --option post-build-hook "" "${OVERRIDE_ARGS[@]}" "${FLAKE_ROOT}"
+  AFTER=$(sha256sum "${FLAKE_ROOT}/flake.lock")
+  if [[ "${BEFORE}" != "${AFTER}" ]]; then
+    LOCK_CHANGED=1
+  fi
+}
+
+resolve_siblings_from_source() {
+  local REV="${1}" COUNT INDEX REQUIREMENT_NAME INPUT_NAME PYPI_NAME FLAKE_REPO MODE REQUIREMENT_FILE REQUIREMENT_FORMAT REQUIREMENT_GROUPS REF REQUIREMENT_TEXT
   COUNT=$(jq 'length' <<<"${SIBLINGS}")
   for (( INDEX = 0; INDEX < COUNT; INDEX++ )); do
     REQUIREMENT_NAME=$(jq -r ".[${INDEX}].reqName" <<<"${SIBLINGS}")
+    INPUT_NAME=$(jq -r ".[${INDEX}].inputName // .[${INDEX}].reqName" <<<"${SIBLINGS}")
     PYPI_NAME=$(jq -r ".[${INDEX}].pypiName // \"\"" <<<"${SIBLINGS}")
     FLAKE_REPO=$(jq -r ".[${INDEX}].flakeRepo" <<<"${SIBLINGS}")
     MODE=$(jq -r ".[${INDEX}].mode // \"resolve\"" <<<"${SIBLINGS}")
@@ -164,34 +211,47 @@ resolve_and_rewrite_siblings() {
     REQUIREMENT_GROUPS=$(jq -c ".[${INDEX}].reqGroups // []" <<<"${SIBLINGS}")
     REQUIREMENT_TEXT=$(fetch_repo_file "${REQUIREMENT_FILE}" "${REV}" || true)
     if [[ -z "${REQUIREMENT_TEXT}" ]]; then
+      if [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+        echo "error: ${REQUIREMENT_FILE} is unavailable at ${REV}" >&2
+        return 1
+      fi
       echo "warning: could not fetch ${REQUIREMENT_FILE} at ${REV}; ${FLAKE_REPO} URL left unchanged." >&2
       continue
     fi
     REF=$(python3 "${CASCADE_PY}" "${REQUIREMENT_FORMAT}" "${REQUIREMENT_NAME}" "${PYPI_NAME}" "${MODE}" "${REQUIREMENT_GROUPS}" <<<"${REQUIREMENT_TEXT}" || true)
     if [[ -z "${REF}" ]]; then
+      if [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+        echo "error: ${REQUIREMENT_FILE} does not resolve ${REQUIREMENT_NAME}" >&2
+        return 1
+      fi
       echo "warning: could not resolve ${REQUIREMENT_NAME} from ${REQUIREMENT_FILE}; ${FLAKE_REPO} URL left unchanged." >&2
       continue
     fi
     echo "  ${REQUIREMENT_NAME} -> github:${FLAKE_REPO}/${REF}"
-    rewrite_sibling_url "${FLAKE_REPO}" "${REF}"
+    apply_sibling_ref "${INPUT_NAME}" "${FLAKE_REPO}" "${REF}"
   done
 }
 
-resolve_and_rewrite_pypi_siblings() {
-  local METADATA="${1}" COUNT INDEX REQUIREMENT_NAME PYPI_NAME FLAKE_REPO MODE REF
+resolve_siblings_from_metadata() {
+  local METADATA="${1}" COUNT INDEX REQUIREMENT_NAME INPUT_NAME PYPI_NAME FLAKE_REPO MODE REF
   COUNT=$(jq 'length' <<<"${SIBLINGS}")
   for (( INDEX = 0; INDEX < COUNT; INDEX++ )); do
     REQUIREMENT_NAME=$(jq -r ".[${INDEX}].reqName" <<<"${SIBLINGS}")
+    INPUT_NAME=$(jq -r ".[${INDEX}].inputName // .[${INDEX}].reqName" <<<"${SIBLINGS}")
     PYPI_NAME=$(jq -r ".[${INDEX}].pypiName // \"\"" <<<"${SIBLINGS}")
     FLAKE_REPO=$(jq -r ".[${INDEX}].flakeRepo" <<<"${SIBLINGS}")
     MODE=$(jq -r ".[${INDEX}].mode // \"resolve\"" <<<"${SIBLINGS}")
     REF=$(python3 "${CASCADE_PY}" metadata "${REQUIREMENT_NAME}" "${PYPI_NAME}" "${MODE}" <<<"${METADATA}" || true)
     if [[ -z "${REF}" ]]; then
+      if [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+        echo "error: release metadata does not resolve ${REQUIREMENT_NAME}" >&2
+        return 1
+      fi
       echo "warning: no applicable ${REQUIREMENT_NAME} requirement could be resolved; ${FLAKE_REPO} URL left unchanged." >&2
       continue
     fi
     echo "  ${REQUIREMENT_NAME} -> github:${FLAKE_REPO}/${REF}"
-    rewrite_sibling_url "${FLAKE_REPO}" "${REF}"
+    apply_sibling_ref "${INPUT_NAME}" "${FLAKE_REPO}" "${REF}"
   done
 }
 
@@ -206,6 +266,7 @@ write_source_pin() {
     for name in $(jq -r '.[]' <<<"${PIN_HASHES}"); do
       echo "  ${name} = \"${extra[${name}]:-}\";"
     done
+    write_sibling_refs
     echo "}"
   } > "${pin}"
 }
@@ -291,7 +352,7 @@ source_pin_current() {
     val=$(nix eval --raw --file "${pin}" "${name}" 2>/dev/null || echo "")
     [[ -n "${val}" ]] || return 1
   done
-  return 0
+  sibling_refs_current
 }
 
 case "${SOURCE_TYPE}" in
@@ -317,10 +378,10 @@ case "${SOURCE_TYPE}" in
     new_hash=$(nix store prefetch-file --json --hash-type sha256 "${url}" | jq -r '.hash')
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
-      resolve_and_rewrite_pypi_siblings "${rel}"
+      resolve_siblings_from_metadata "${rel}"
     fi
     if pypi_pin_current "${new_version}" "${new_hash}"; then
-      if (( CASCADE_CHANGED == 0 )); then
+      if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
         echo "Already up to date (${cur_version})."
         exit 0
       fi
@@ -372,24 +433,28 @@ case "${SOURCE_TYPE}" in
     fi
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
-      resolve_and_rewrite_siblings "${new_rev}"
+      resolve_siblings_from_source "${new_rev}"
     fi
-    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}" && (( CASCADE_CHANGED == 0 )); then
-      echo "Already up to date (${new_version})."
-      exit 0
-    fi
-    run_artifact_hook "${new_rev}" "${new_version}"
-    if [[ "${HASH_MODE}" == "build-failure" ]]; then
-      new_hash=""
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+      if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
+        echo "Already up to date (${new_version})."
+        exit 0
+      fi
+      echo "Source pin already up to date (${new_version})."
     else
-      echo "Computing source hash for ${GH_OWNER}/${GH_REPO}@${new_rev}..."
-      new_hash=$(nix-prefetch-github ${GH_FETCH_SUBMODULES:+--fetch-submodules} --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
-    fi
-    echo "Writing pin.nix (-> ${new_version})..."
-    write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
-    pin_changed=1
-    if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
-      revalidate_hash "${BUILD_FAILURE_HASH}"
+      run_artifact_hook "${new_rev}" "${new_version}"
+      if [[ "${HASH_MODE}" == "build-failure" ]]; then
+        new_hash=""
+      else
+        echo "Computing source hash for ${GH_OWNER}/${GH_REPO}@${new_rev}..."
+        new_hash=$(nix-prefetch-github ${GH_FETCH_SUBMODULES:+--fetch-submodules} --rev "${new_rev}" "${GH_OWNER}" "${GH_REPO}" --json | jq -r '.hash // .sha256')
+      fi
+      echo "Writing pin.nix (-> ${new_version})..."
+      write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
+      pin_changed=1
+      if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
+        revalidate_hash "${BUILD_FAILURE_HASH}"
+      fi
     fi
     ;;
 
@@ -494,24 +559,28 @@ EOF
     fi
     if [[ "$(jq 'length' <<<"${SIBLINGS}")" -gt 0 ]]; then
       echo "Resolving sibling cascades..."
-      resolve_and_rewrite_siblings "${new_rev}"
+      resolve_siblings_from_source "${new_rev}"
     fi
-    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}" && (( CASCADE_CHANGED == 0 )); then
-      echo "Already up to date (${new_version})."
-      exit 0
-    fi
-    run_artifact_hook "${new_rev}" "${new_version}"
-    if [[ "${HASH_MODE}" == "build-failure" ]]; then
-      new_hash=""
+    if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
+      if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
+        echo "Already up to date (${new_version})."
+        exit 0
+      fi
+      echo "Source pin already up to date (${new_version})."
     else
-      echo "Computing source hash for ${GITLAB_OWNER}/${GITLAB_REPO}@${new_rev}..."
-      new_hash=$(nix-prefetch-git --quiet --url "https://gitlab.com/${GITLAB_OWNER}/${GITLAB_REPO}.git" --rev "${new_rev}" | jq -r '.hash')
-    fi
-    echo "Writing pin.nix (-> ${new_version})..."
-    write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
-    pin_changed=1
-    if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
-      revalidate_hash "${BUILD_FAILURE_HASH}"
+      run_artifact_hook "${new_rev}" "${new_version}"
+      if [[ "${HASH_MODE}" == "build-failure" ]]; then
+        new_hash=""
+      else
+        echo "Computing source hash for ${GITLAB_OWNER}/${GITLAB_REPO}@${new_rev}..."
+        new_hash=$(nix-prefetch-git --quiet --url "https://gitlab.com/${GITLAB_OWNER}/${GITLAB_REPO}.git" --rev "${new_rev}" | jq -r '.hash')
+      fi
+      echo "Writing pin.nix (-> ${new_version})..."
+      write_source_pin "${new_version}" "${new_rev}" "${new_hash}"
+      pin_changed=1
+      if [[ -n "${BUILD_FAILURE_HASH}" ]]; then
+        revalidate_hash "${BUILD_FAILURE_HASH}"
+      fi
     fi
     ;;
 
@@ -520,6 +589,16 @@ EOF
     exit 1
     ;;
 esac
+
+if (( pin_changed || CASCADE_CHANGED )) || [[ -n "${SIBLING_REFS_IN_PIN}" ]]; then
+  echo "Updating flake.lock..."
+  update_flake_lock
+fi
+
+if (( pin_changed == 0 && CASCADE_CHANGED == 0 && LOCK_CHANGED == 0 )); then
+  echo "Already up to date (${new_version})."
+  exit 0
+fi
 
 if [[ -n "${SKIP_BUILD}" ]]; then
   echo "SKIP_BUILD set; skipping build verification of ${BUILD_ATTR}."
@@ -534,4 +613,3 @@ if (( pin_changed )); then
 else
   echo "${BUILD_ATTR}: pin unchanged (${new_version})."
 fi
-echo "  Commit pin.nix / flake.nix / flake.lock to capture."

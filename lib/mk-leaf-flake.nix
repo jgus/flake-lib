@@ -7,6 +7,7 @@
 , pin
 , branches ? true
 , siblings ? [ ]
+, siblingRefsInPin ? false
 , branchOwnedFiles ? [ "pin.nix" "flake.lock" ]
 }:
 flake-utils.lib.eachDefaultSystem (system:
@@ -14,7 +15,7 @@ flake-utils.lib.eachDefaultSystem (system:
     pkgs = import nixpkgs { inherit system; };
     pkg = mkPypiPackage { inherit pkgs source package pin; };
     pinSchema = if source.type == "pypi" then "pypi" else "github";
-    update-version = mkUpdateVersion { inherit pkgs source siblings; buildAttr = package.attr; };
+    update-version = mkUpdateVersion { inherit pkgs source siblings siblingRefsInPin; buildAttr = package.attr; };
     update-branches = mkUpdateBranches { inherit pkgs source pinSchema branchOwnedFiles; };
   in
   {

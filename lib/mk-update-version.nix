@@ -7,6 +7,7 @@
 , source
 , buildAttr
 , siblings ? [ ]
+, siblingRefsInPin ? false
 , hashMode ? "prefetch"
 , extraHashes ? [ ]
 , buildFailureHash ? if hashMode == "build-failure" then "sourceHash" else null
@@ -41,6 +42,7 @@ pkgs.writeShellApplication {
     BUILD_FAILURE_HASH = if buildFailureHash == null then "" else buildFailureHash;
     ARTIFACT_HOOK = if artifactHook == null then "" else "${artifactHook}";
     SIBLINGS = builtins.toJSON siblings;
+    SIBLING_REFS_IN_PIN = pkgs.lib.optionalString siblingRefsInPin "1";
     CASCADE_PY = "${../scripts/cascade.py}";
   };
   text = ''exec ${../scripts/update-version.sh} "$@"'';
