@@ -64,6 +64,8 @@ rewrite) are all driven from that spec.
 
 PyPI producers resolve sibling requirements from their release metadata. Exact pins select exact branches, unbounded minimums select `main`, and bounded ranges select a compatible aggregate. PyPI prerelease branches remain available as exact history but do not advance aggregate branches unless `includePrereleaseAggregates` is enabled.
 
+GitHub producers read sibling requirements from `reqFile = "requirements.txt"` by default. Set `reqFormat = "pyproject"`, `reqFile = "pyproject.toml"`, and `reqGroups = [ "extra-name" ]` to combine `[project].dependencies` with selected optional-dependency groups. Environment markers are evaluated before the compatible branch is selected.
+
 `buildFailureHash` names one additional pin field whose value is populated from
 the package build's fixed-output hash mismatch. This supports dependency fetchers
 such as `fetchPnpmDeps` while the source tree continues to use normal prefetching.

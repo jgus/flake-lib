@@ -2,6 +2,7 @@ import http.client
 import json
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Iterable, Mapping
@@ -76,6 +77,7 @@ def resolve_ref(
     if releases is None:
         releases = fetch_pypi_metadata(pypi_name)["releases"]
 
+    stable_versions = []
     candidates = []
     for raw_version in releases:
         try:
@@ -84,6 +86,7 @@ def resolve_ref(
             continue
         if version.is_prerelease or version.is_devrelease:
             continue
+        stable_versions.append(version)
         if specifiers.contains(version):
             candidates.append(version)
 
@@ -91,11 +94,18 @@ def resolve_ref(
         return None
 
     latest = max(candidates)
+    latest_in_minor = max(
+        version
+        for version in stable_versions
+        if version.major == latest.major and version.minor == latest.minor
+    )
+    if latest != latest_in_minor:
+        return f"v{latest.public}"
     return f"v{latest.major}.{latest.minor}"
 
 
-def requirement_specifiers(
-    metadata: Mapping[str, Any],
+def requirements_specifiers(
+    raw_requirements: Iterable[str],
     requirement_name: str,
     environment: Mapping[str, str] | None = None,
 ) -> SpecifierSet | None:
@@ -106,7 +116,11 @@ def requirement_specifiers(
     normalized_name = canonicalize_name(requirement_name)
     matched = []
 
-    for raw_requirement in metadata.get("info", {}).get("requires_dist") or []:
+    for raw_requirement in raw_requirements:
+        raw_requirement = raw_requirement.strip()
+        if not raw_requirement or raw_requirement.startswith(("#", "-")):
+            continue
+        raw_requirement = raw_requirement.split(" #", 1)[0].strip()
         try:
             requirement = Requirement(raw_requirement)
         except InvalidRequirement:
@@ -124,6 +138,32 @@ def requirement_specifiers(
     return SpecifierSet(",".join(filter(None, matched)))
 
 
+def requirement_specifiers(
+    metadata: Mapping[str, Any],
+    requirement_name: str,
+    environment: Mapping[str, str] | None = None,
+) -> SpecifierSet | None:
+    return requirements_specifiers(
+        metadata.get("info", {}).get("requires_dist") or [],
+        requirement_name,
+        environment,
+    )
+
+
+def pyproject_requirement_specifiers(
+    document: str,
+    requirement_name: str,
+    optional_groups: Iterable[str],
+    environment: Mapping[str, str] | None = None,
+) -> SpecifierSet | None:
+    project = tomllib.loads(document).get("project", {})
+    raw_requirements = list(project.get("dependencies") or [])
+    optional_dependencies = project.get("optional-dependencies") or {}
+    for group in optional_groups:
+        raw_requirements.extend(optional_dependencies.get(group) or [])
+    return requirements_specifiers(raw_requirements, requirement_name, environment)
+
+
 def resolve_metadata_ref(
     metadata: Mapping[str, Any],
     requirement_name: str,
@@ -132,6 +172,37 @@ def resolve_metadata_ref(
     environment: Mapping[str, str] | None = None,
 ) -> str | None:
     specifiers = requirement_specifiers(metadata, requirement_name, environment)
+    if specifiers is None:
+        return None
+    return resolve_ref(mode, pypi_name or requirement_name, specifiers)
+
+
+def resolve_requirements_ref(
+    raw_requirements: Iterable[str],
+    requirement_name: str,
+    pypi_name: str,
+    mode: str,
+    environment: Mapping[str, str] | None = None,
+) -> str | None:
+    specifiers = requirements_specifiers(
+        raw_requirements, requirement_name, environment
+    )
+    if specifiers is None:
+        return None
+    return resolve_ref(mode, pypi_name or requirement_name, specifiers)
+
+
+def resolve_pyproject_ref(
+    document: str,
+    requirement_name: str,
+    pypi_name: str,
+    mode: str,
+    optional_groups: Iterable[str],
+    environment: Mapping[str, str] | None = None,
+) -> str | None:
+    specifiers = pyproject_requirement_specifiers(
+        document, requirement_name, optional_groups, environment
+    )
     if specifiers is None:
         return None
     return resolve_ref(mode, pypi_name or requirement_name, specifiers)
@@ -168,6 +239,24 @@ def main(arguments: list[str]) -> None:
     if command == "metadata":
         ref = resolve_metadata_ref(
             json.load(sys.stdin), arguments[2], arguments[3], arguments[4]
+        )
+        if ref is not None:
+            print(ref)
+        return
+    if command == "requirements":
+        ref = resolve_requirements_ref(
+            sys.stdin, arguments[2], arguments[3], arguments[4]
+        )
+        if ref is not None:
+            print(ref)
+        return
+    if command == "pyproject":
+        ref = resolve_pyproject_ref(
+            sys.stdin.read(),
+            arguments[2],
+            arguments[3],
+            arguments[4],
+            json.loads(arguments[5]),
         )
         if ref is not None:
             print(ref)

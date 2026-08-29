@@ -152,31 +152,28 @@ rewrite_sibling_url() {
 
 resolve_and_rewrite_siblings() {
   # $1 = source rev to read requirements at. Rewrites flake.nix sibling URLs in place.
-  local rev="$1" n i reqName pypiName flakeRepo mode reqFile spec ref req_text
-  n=$(jq 'length' <<<"${SIBLINGS}")
-  for (( i = 0; i < n; i++ )); do
-    reqName=$(jq -r ".[$i].reqName" <<<"${SIBLINGS}")
-    pypiName=$(jq -r ".[$i].pypiName // \"\"" <<<"${SIBLINGS}")
-    flakeRepo=$(jq -r ".[$i].flakeRepo" <<<"${SIBLINGS}")
-    mode=$(jq -r ".[$i].mode // \"resolve\"" <<<"${SIBLINGS}")
-    reqFile=$(jq -r ".[$i].reqFile // \"requirements.txt\"" <<<"${SIBLINGS}")
-    req_text=$(fetch_repo_file "${reqFile}" "${rev}" || true)
-    if [[ -z "${req_text}" ]]; then
-      echo "warning: could not fetch ${reqFile} at ${rev}; ${flakeRepo} URL left unchanged." >&2
+  local REV="${1}" COUNT INDEX REQUIREMENT_NAME PYPI_NAME FLAKE_REPO MODE REQUIREMENT_FILE REQUIREMENT_FORMAT REQUIREMENT_GROUPS REF REQUIREMENT_TEXT
+  COUNT=$(jq 'length' <<<"${SIBLINGS}")
+  for (( INDEX = 0; INDEX < COUNT; INDEX++ )); do
+    REQUIREMENT_NAME=$(jq -r ".[${INDEX}].reqName" <<<"${SIBLINGS}")
+    PYPI_NAME=$(jq -r ".[${INDEX}].pypiName // \"\"" <<<"${SIBLINGS}")
+    FLAKE_REPO=$(jq -r ".[${INDEX}].flakeRepo" <<<"${SIBLINGS}")
+    MODE=$(jq -r ".[${INDEX}].mode // \"resolve\"" <<<"${SIBLINGS}")
+    REQUIREMENT_FILE=$(jq -r ".[${INDEX}].reqFile // \"requirements.txt\"" <<<"${SIBLINGS}")
+    REQUIREMENT_FORMAT=$(jq -r ".[${INDEX}].reqFormat // \"requirements\"" <<<"${SIBLINGS}")
+    REQUIREMENT_GROUPS=$(jq -c ".[${INDEX}].reqGroups // []" <<<"${SIBLINGS}")
+    REQUIREMENT_TEXT=$(fetch_repo_file "${REQUIREMENT_FILE}" "${REV}" || true)
+    if [[ -z "${REQUIREMENT_TEXT}" ]]; then
+      echo "warning: could not fetch ${REQUIREMENT_FILE} at ${REV}; ${FLAKE_REPO} URL left unchanged." >&2
       continue
     fi
-    spec=$(printf '%s\n' "${req_text}" | sed -nE "s/^${reqName}(\[[^]]*\])?[[:space:]]*([~<>=!].*)$/\2/p" | head -1)
-    if [[ -z "${spec}" ]]; then
-      echo "warning: no ${reqName} line in ${reqFile}; ${flakeRepo} URL left unchanged." >&2
+    REF=$(python3 "${CASCADE_PY}" "${REQUIREMENT_FORMAT}" "${REQUIREMENT_NAME}" "${PYPI_NAME}" "${MODE}" "${REQUIREMENT_GROUPS}" <<<"${REQUIREMENT_TEXT}" || true)
+    if [[ -z "${REF}" ]]; then
+      echo "warning: could not resolve ${REQUIREMENT_NAME} from ${REQUIREMENT_FILE}; ${FLAKE_REPO} URL left unchanged." >&2
       continue
     fi
-    ref=$(python3 "${CASCADE_PY}" "${mode}" "${pypiName}" "${spec}" || true)
-    if [[ -z "${ref}" ]]; then
-      echo "warning: could not resolve ${reqName} '${spec}'; ${flakeRepo} URL left unchanged." >&2
-      continue
-    fi
-    echo "  ${reqName} ${spec} -> github:${flakeRepo}/${ref}"
-    rewrite_sibling_url "${flakeRepo}" "${ref}"
+    echo "  ${REQUIREMENT_NAME} -> github:${FLAKE_REPO}/${REF}"
+    rewrite_sibling_url "${FLAKE_REPO}" "${REF}"
   done
 }
 
