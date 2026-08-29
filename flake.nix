@@ -74,6 +74,12 @@
           python3 ${./tests/test_cascade.py}
           touch $out
         '';
+        version-matches-comparison-tests =
+          let
+            failures = pkgs.lib.runTests (import ./tests/version-matches-comparison.nix { inherit (lib) versionMatchesComparison; });
+          in
+          pkgs.lib.throwIf (failures != [ ]) "versionMatchesComparison tests failed"
+            (pkgs.runCommand "version-matches-comparison-tests" { } "touch $out");
       in
       {
         packages = { inherit update-version update-branches update-version-pypi-cargo update-branches-pypi-cargo update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
@@ -83,7 +89,7 @@
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
           composed-hook = hookCheck "composed-hook" composed-hook;
-          inherit cascade-tests;
+          inherit cascade-tests version-matches-comparison-tests;
         };
       });
 }
