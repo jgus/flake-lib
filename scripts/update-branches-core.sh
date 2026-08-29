@@ -8,7 +8,7 @@
 #
 # Single knob: $MINIMUM_TRACKING_VERSION. Permanent pins are done via git tags (which the action never touches); there is no in-band freeze list.
 #
-# Each existing exact branch is `git merge`d with origin/main before its update-version runs, so orchestrator/workflow improvements that land on main propagate forward through every branch's tree. Branch-owned files (pin.nix, flake.lock, flake.nix, ...) stay as-is via the `ours` merge driver declared in .gitattributes. The shared scripts come from the flake-lib input, so the per-branch `nix flake update` below picks up their improvements automatically.
+# Each existing exact branch is `git merge`d with origin/main before its update-version runs, so orchestrator/workflow improvements that land on main propagate forward through every branch's tree. Branch-owned files (pin.nix, flake.lock, generated artifacts) stay as-is via the `ours` merge driver declared in .gitattributes. The shared scripts come from the flake-lib input, so the per-branch `nix flake update` below picks up their improvements automatically.
 #
 # Failures: per-branch update-version failures are surfaced as GH Actions ::warning::
 # annotations + a step summary, and cause a non-zero exit at the end of the run.
@@ -30,6 +30,7 @@ set -euo pipefail
 MIN_VERSION_COMPONENTS="${MIN_VERSION_COMPONENTS:-3}"
 
 FLAKE_ROOT="${FLAKE_ROOT:-${PWD}}"
+readonly -a VERSION_INDEPENDENT_FILES=(flake.nix .gitattributes)
 cd "${FLAKE_ROOT}"
 
 # Buffers output and emits it only on success, so a consumer never sees partial data from an attempt that died mid-stream (e.g. gh --paginate failing between pages).
@@ -239,6 +240,7 @@ for v in "${tracked[@]}"; do
     git worktree add -B "${branch}" "${wt}" "origin/${branch}" >/dev/null
     # Merge orchestrator/workflow improvements from main; branch-owned files stay as-is per .gitattributes.
     (cd "${wt}" && git merge --no-edit origin/main)
+    git -C "${wt}" restore --source origin/main --worktree -- "${VERSION_INDEPENDENT_FILES[@]}"
   else
     echo
     echo "=== Creating new branch ${branch} from main"
@@ -260,9 +262,9 @@ for v in "${tracked[@]}"; do
     continue
   fi
   # shellcheck disable=SC2086
-  if ! git diff --quiet -- ${BRANCH_OWNED_FILES} || [[ -n "$(git ls-files --others --exclude-standard -- ${BRANCH_OWNED_FILES})" ]]; then
+  if ! git diff --quiet -- ${BRANCH_OWNED_FILES} "${VERSION_INDEPENDENT_FILES[@]}" || [[ -n "$(git ls-files --others --exclude-standard -- ${BRANCH_OWNED_FILES} "${VERSION_INDEPENDENT_FILES[@]}")" ]]; then
     # shellcheck disable=SC2086
-    git add ${BRANCH_OWNED_FILES}
+    git add ${BRANCH_OWNED_FILES} "${VERSION_INDEPENDENT_FILES[@]}"
     git commit -q -m "auto: ${v} pin"
     git push --quiet origin "${branch}"
   else
