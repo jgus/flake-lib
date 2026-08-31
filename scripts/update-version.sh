@@ -11,7 +11,6 @@
 #   GH_TAG                    release-tag template; token ${version} (default: v${version})  [github-release-asset]
 #   GITLAB_OWNER/GITLAB_REPO  GitLab owner/repo              [gitlab]
 #   GITLAB_TRACK              release (tags -> X.Y.Z) | commit (master HEAD -> 0-unstable-DATE)  [gitlab]
-#   BUILD_ATTR    flake package attr to build-verify
 #   SIBLINGS      JSON array of sibling-cascade specs (may be [])
 #   CASCADE_PY    path to cascade.py (python3+packaging supplied via runtimeInputs)
 #
@@ -45,7 +44,7 @@ EXTRA_HASHES="${EXTRA_HASHES:-[]}"        # JSON array of extra pin field names 
 PIN_HASHES="${PIN_HASHES:-${EXTRA_HASHES}}"
 BUILD_FAILURE_HASH="${BUILD_FAILURE_HASH:-}"
 ARTIFACT_HOOK="${ARTIFACT_HOOK:-}"        # consumer script: regenerate vendored files, emit name=value extra hashes
-SKIP_BUILD="${SKIP_BUILD:-}"              # non-empty: skip the final build verification (heavy builds)
+VERIFICATION="${VERIFICATION:-evaluate}"
 SIBLINGS="${SIBLINGS:-[]}"
 SIBLING_REFS_IN_PIN="${SIBLING_REFS_IN_PIN:-}"
 CASCADE_PY="${CASCADE_PY:-}"
@@ -62,6 +61,18 @@ HF_FILES="${HF_FILES:-[]}"
 declare -A extra=()
 declare -A HF_HASHES=()
 RESOLVED_SIBLING_REFS='{}'
+
+evaluate_package() {
+  echo "Evaluating ${BUILD_ATTR}..."
+  nix eval --option post-build-hook "" --raw "${FLAKE_ROOT}#${BUILD_ATTR}.drvPath" >/dev/null
+}
+
+finish_unchanged() {
+  local VERSION="${1}"
+  evaluate_package
+  echo "Already up to date (${VERSION})."
+  exit 0
+}
 
 write_sibling_refs() {
   [[ -z "${SIBLING_REFS_IN_PIN}" ]] && return 0
@@ -382,8 +393,7 @@ case "${SOURCE_TYPE}" in
     fi
     if pypi_pin_current "${new_version}" "${new_hash}"; then
       if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
-        echo "Already up to date (${cur_version})."
-        exit 0
+        finish_unchanged "${cur_version}"
       fi
       echo "Source pin already up to date (${cur_version})."
     else
@@ -437,8 +447,7 @@ case "${SOURCE_TYPE}" in
     fi
     if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
       if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
-        echo "Already up to date (${new_version})."
-        exit 0
+        finish_unchanged "${new_version}"
       fi
       echo "Source pin already up to date (${new_version})."
     else
@@ -474,8 +483,7 @@ case "${SOURCE_TYPE}" in
     cur_version=$(nix eval --raw --file "${pin}" version 2>/dev/null || echo "")
     cur_hash=$(nix eval --raw --file "${pin}" hash 2>/dev/null || echo "")
     if [[ "${cur_version}" == "${new_version}" && -n "${cur_hash}" ]]; then
-      echo "Already up to date (${new_version})."
-      exit 0
+      finish_unchanged "${new_version}"
     fi
     tag_tmpl="${GH_TAG}"
     [[ -n "${tag_tmpl}" ]] || tag_tmpl='v${version}'
@@ -512,8 +520,7 @@ EOF
     fi
     new_version="0-unstable-${HF_DATE}"
     if huggingface_pin_current "${new_version}" "${HF_REV}"; then
-      echo "Already up to date (${new_version})."
-      exit 0
+      finish_unchanged "${new_version}"
     fi
     while IFS= read -r HF_FILE; do
       HF_FILE_URL=$(jq -rn --arg VALUE "${HF_FILE}" '$VALUE | split("/") | map(@uri) | join("/")')
@@ -563,8 +570,7 @@ EOF
     fi
     if [[ "${HASH_MODE}" != "build-failure" ]] && source_pin_current "${new_version}" "${new_rev}"; then
       if [[ -z "${SIBLING_REFS_IN_PIN}" ]] && (( CASCADE_CHANGED == 0 )); then
-        echo "Already up to date (${new_version})."
-        exit 0
+        finish_unchanged "${new_version}"
       fi
       echo "Source pin already up to date (${new_version})."
     else
@@ -596,13 +602,12 @@ if (( pin_changed || CASCADE_CHANGED )) || [[ -n "${SIBLING_REFS_IN_PIN}" ]]; th
 fi
 
 if (( pin_changed == 0 && CASCADE_CHANGED == 0 && LOCK_CHANGED == 0 )); then
-  echo "Already up to date (${new_version})."
-  exit 0
+  finish_unchanged "${new_version}"
 fi
 
-if [[ -n "${SKIP_BUILD}" ]]; then
-  echo "SKIP_BUILD set; skipping build verification of ${BUILD_ATTR}."
-else
+evaluate_package
+
+if [[ "${VERIFICATION}" == "build" ]]; then
   echo "Verifying build (${BUILD_ATTR})..."
   nix build --option post-build-hook "" "${FLAKE_ROOT}#${BUILD_ATTR}" --no-link
 fi

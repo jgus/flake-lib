@@ -12,7 +12,10 @@
 , extraHashes ? [ ]
 , buildFailureHash ? if hashMode == "build-failure" then "sourceHash" else null
 , artifactHook ? null
+, verification ? if buildFailureHash == null then "evaluate" else "build"
 }:
+assert builtins.elem verification [ "evaluate" "build" ];
+assert buildFailureHash == null || verification == "build";
 pkgs.writeShellApplication {
   name = "update-version";
   # EXTRA_HASHES / SIBLINGS are JSON strings (quotes/brackets) consumed via jq at runtime (SC2089/SC2090); GH_ASSET/GH_TAG carry a literal ${version}/${tag} token the script substitutes at runtime, intentionally single-quoted (SC2016). All false positives on the generated export.
@@ -41,6 +44,7 @@ pkgs.writeShellApplication {
     PIN_HASHES = builtins.toJSON (pkgs.lib.unique (extraHashes ++ pkgs.lib.optional (buildFailureHash != null && buildFailureHash != "sourceHash") buildFailureHash));
     BUILD_FAILURE_HASH = if buildFailureHash == null then "" else buildFailureHash;
     ARTIFACT_HOOK = if artifactHook == null then "" else "${artifactHook}";
+    VERIFICATION = verification;
     SIBLINGS = builtins.toJSON siblings;
     SIBLING_REFS_IN_PIN = pkgs.lib.optionalString siblingRefsInPin "1";
     CASCADE_PY = "${../scripts/cascade.py}";
