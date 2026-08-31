@@ -115,6 +115,12 @@ studio = [
             ["3.4.3", "3.4.4"],
         )
 
+    def test_prerelease_classification(self) -> None:
+        self.assertTrue(CASCADE.is_prerelease("3.0.3-RC"))
+        self.assertTrue(CASCADE.is_prerelease("3.0.3.dev1"))
+        self.assertFalse(CASCADE.is_prerelease("3.0.3"))
+        self.assertFalse(CASCADE.is_prerelease("3.0.3+cuda"))
+
 
 if __name__ == "__main__":
     unittest.main()

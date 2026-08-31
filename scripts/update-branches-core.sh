@@ -22,7 +22,6 @@
 #   BRANCH_OWNED_FILES   space-separated files update-version mutates per branch
 #   VERSION_OVERRIDES    JSON map raw version -> canonical version
 #   VERSION_CANON        newline-separated `sed -E` rules mapping raw version -> canonical version
-#   EXCLUDE_PRERELEASES  non-empty to drop X.Y.Z-foo prerelease tags
 #   MIN_VERSION_COMPONENTS  fewest dot-separated numeric components a tag may have and still be tracked (default 3)
 
 set -euo pipefail
@@ -151,6 +150,11 @@ EOF
 
 version_lt() { [[ "$1" != "$2" ]] && [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$1" ]]; }
 
+is_prerelease() {
+  local VERSION="${1}"
+  [[ "${SOURCE_TYPE}" != "pypi" && "${VERSION%%+*}" == *-* ]] || python3 "${CASCADE_PY}" prerelease "${VERSION}"
+}
+
 canonicalize_version() {
   local v="$1" canon rule
   canon=$(jq -r --arg v "${v}" '.[$v] // ""' <<<"${VERSION_OVERRIDES}")
@@ -187,8 +191,6 @@ declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
   v="${v#[Vv]}"
-  # Drop semver prereleases (X.Y.Z-foo) when opted in. sort -V ranks 0.8.6-rc1 *after* 0.8.6, so an upstream that tags release candidates (e.g. LibreChat) would otherwise pin aggregates to the rc. Off by default — some flakes legitimately track -beta tags.
-  if [[ -n "${EXCLUDE_PRERELEASES:-}" && "${v}" == *-* ]]; then continue; fi
   if [[ "${v}" =~ ${version_re} ]]; then
     canon=$(canonicalize_version "${v}")
     all_versions+=("${canon}")
@@ -198,11 +200,7 @@ done
 
 declare -a tracked=()
 if [[ "${SOURCE_TYPE}" == "pypi" ]]; then
-  PYPI_SORT_MODE="all"
-  if [[ -n "${EXCLUDE_PRERELEASES:-}" ]]; then
-    PYPI_SORT_MODE="stable"
-  fi
-  mapfile -t tracked < <(printf '%s\n' "${all_versions[@]}" | python3 "${CASCADE_PY}" sort "${MINIMUM_TRACKING_VERSION}" "${PYPI_SORT_MODE}")
+  mapfile -t tracked < <(printf '%s\n' "${all_versions[@]}" | python3 "${CASCADE_PY}" sort "${MINIMUM_TRACKING_VERSION}" all)
 else
   for v in "${all_versions[@]}"; do
     if ! version_lt "${v}" "${MINIMUM_TRACKING_VERSION}"; then
@@ -271,12 +269,10 @@ done
 
 git fetch --prune --quiet origin
 declare -A agg_target_version=()
+declare -A tracked_version=()
 record() { local KEY="${1}" VERSION="${2}"; agg_target_version[${KEY}]="${VERSION}"; }
-declare -a aggregate_versions=("${tracked[@]}")
-if [[ "${SOURCE_TYPE}" == "pypi" && -z "${INCLUDE_PRERELEASE_AGGREGATES:-}" ]]; then
-  mapfile -t aggregate_versions < <(printf '%s\n' "${tracked[@]}" | python3 "${CASCADE_PY}" sort "${MINIMUM_TRACKING_VERSION}" stable)
-fi
-for v in "${aggregate_versions[@]}"; do
+for v in "${tracked[@]}"; do
+  tracked_version[${v}]=1
   # Only consider exact branches that actually exist on origin (failed branches won't have a ref to advance aggregates to). Checked against the just-pruned local refs, not via ls-remote — a transient network error misread as "absent" here would force-push aggregates backwards.
   if ! git rev-parse --verify --quiet "origin/v${v}" >/dev/null; then
     continue
@@ -292,9 +288,32 @@ echo
 echo "=== Updating aggregate pointers"
 for agg in "${!agg_target_version[@]}"; do
   target_v="${agg_target_version[$agg]}"
+  if is_prerelease "${target_v}"; then
+    STABLE_V="${target_v%%-*}"
+    if [[ "${STABLE_V}" != "${target_v}" && -n "${tracked_version[${STABLE_V}]:-}" ]] && git rev-parse --verify --quiet "origin/v${STABLE_V}" >/dev/null; then
+      target_v="${STABLE_V}"
+    fi
+  fi
   target_branch="v${target_v}"
   target_sha=$(git rev-parse --verify "origin/${target_branch}")
   cur_sha=$(git rev-parse --verify "origin/${agg}" 2>/dev/null || echo "")
+  if [[ "${cur_sha}" == "${target_sha}" ]]; then
+    echo "  ${agg} already at ${target_branch}"
+    continue
+  fi
+  if is_prerelease "${target_v}" && [[ -n "${cur_sha}" ]]; then
+    CURRENT_V=$(git show "${cur_sha}:pin.nix" | sed -nE 's/^[[:space:]]*version = "([^"]+)";$/\1/p' | head -1)
+    if ! is_prerelease "${CURRENT_V}"; then
+      CURRENT_BRANCH="v${CURRENT_V}"
+      if [[ -n "${CURRENT_V}" ]] && git rev-parse --verify --quiet "origin/${CURRENT_BRANCH}" >/dev/null; then
+        target_branch="${CURRENT_BRANCH}"
+        target_sha=$(git rev-parse --verify "origin/${target_branch}")
+      else
+        echo "  ${agg} remains at its current stable target"
+        continue
+      fi
+    fi
+  fi
   if [[ "${cur_sha}" == "${target_sha}" ]]; then
     echo "  ${agg} already at ${target_branch}"
     continue

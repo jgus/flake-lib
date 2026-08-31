@@ -229,6 +229,14 @@ def sorted_versions(
     return [raw_version for _, raw_version in sorted(versions)]
 
 
+def is_prerelease(raw_version: str) -> bool:
+    try:
+        version = Version(raw_version)
+    except InvalidVersion:
+        return False
+    return version.is_prerelease or version.is_devrelease
+
+
 def main(arguments: list[str]) -> None:
     command = arguments[1]
     if command in {"exact", "resolve"}:
@@ -266,6 +274,8 @@ def main(arguments: list[str]) -> None:
         for version in sorted_versions(sys.stdin, arguments[2], stable_only):
             print(version)
         return
+    if command == "prerelease":
+        raise SystemExit(0 if is_prerelease(arguments[2]) else 1)
     raise ValueError(f"unknown command: {command}")
 
 

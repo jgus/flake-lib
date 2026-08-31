@@ -82,7 +82,7 @@
             (pkgs.runCommand "version-matches-comparison-tests" { } "touch $out");
         update-branches-test-gh = pkgs.writeShellApplication {
           name = "gh";
-          text = ''printf '%s\n' 1.0.1'';
+          text = ''printf '%s\n' "''${TEST_VERSIONS}"'';
         };
         update-branches-test-nix = pkgs.writeShellApplication {
           name = "nix";
@@ -113,9 +113,11 @@
               pkgs.git
               pkgs.gnused
               pkgs.jq
+              (pkgs.python3.withPackages (pythonPackages: [ pythonPackages.packaging ]))
               update-branches-test-gh
               update-branches-test-nix
             ];
+            CASCADE_PY = ./scripts/cascade.py;
             UPDATE_BRANCHES_CORE = ./scripts/update-branches-core.sh;
           } ''
           bash ${./tests/test_update_branches.sh}
