@@ -71,14 +71,14 @@ list_upstream_versions() {
   esac
 }
 
-write_placeholder_pin() {
-  local v="$1" EXTRA_HASH
+prepare_new_branch_pin() {
+  local VERSION="${1}" EXTRA_HASH
   case "${PIN_SCHEMA}" in
     pypi)
       {
         cat <<EOF
 {
-  version = "${v}";
+  version = "${VERSION}";
   hash = "";
 EOF
         for EXTRA_HASH in $(jq -r '.[]' <<<"${EXTRA_HASHES:-[]}"); do
@@ -91,7 +91,7 @@ EOF
       cat > pin.nix <<EOF
 # Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
 {
-  version = "${v}";
+  version = "${VERSION}";
   sourceRev = "";
   sourceHash = "";
 }
@@ -101,7 +101,7 @@ EOF
       cat > pin.nix <<EOF
 # Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
 {
-  version = "${v}";
+  version = "${VERSION}";
   sourceRev = "";
   sourceHash = "";
   npmDepsHash = "";
@@ -112,7 +112,7 @@ EOF
       cat > pin.nix <<EOF
 # Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
 {
-  version = "${v}";
+  version = "${VERSION}";
   sourceRev = "";
   sourceHash = "";
   pnpmDepsHash = "";
@@ -123,7 +123,7 @@ EOF
       cat > pin.nix <<EOF
 # Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
 {
-  version = "${v}";
+  version = "${VERSION}";
   sourceRev = "";
   sourceHash = "";
   yarnHash = "";
@@ -135,19 +135,12 @@ EOF
       cat > pin.nix <<EOF
 # Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
 {
-  version = "${v}";
+  version = "${VERSION}";
   hash = "";
 }
 EOF
       ;;
     version-only)
-      # For flakes whose update-version rewrites the whole pin with a non-standard shape (e.g. a keyed table of per-artifact hashes). The placeholder carries only the version; update-version replaces the file entirely before any build.
-      cat > pin.nix <<EOF
-# Auto-managed by \`nix run .#update-version\`. Manual edits will be overwritten by the next bump.
-{
-  version = "${v}";
-}
-EOF
       ;;
     *)
       echo "error: unknown PIN_SCHEMA=${PIN_SCHEMA}" >&2
@@ -243,7 +236,7 @@ for v in "${tracked[@]}"; do
     echo
     echo "=== Creating new branch ${branch} from main"
     git worktree add -B "${branch}" "${wt}" "${main_sha}" >/dev/null
-    (cd "${wt}" && write_placeholder_pin "${v}")
+    (cd "${wt}" && prepare_new_branch_pin "${v}")
   fi
   pushd "${wt}" >/dev/null
   set +e

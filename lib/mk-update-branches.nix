@@ -1,5 +1,5 @@
 # Generates the `update-branches` orchestrator package.
-#   pinSchema        : pypi | github | github-npm | github-pnpm | github-yarn | github-asset | version-only (placeholder pin shape)
+#   pinSchema        : pypi | github | github-npm | github-pnpm | github-yarn | github-asset | version-only
 #   branchOwnedFiles : files update-version mutates (diffed, added, committed per branch)
 #   versionOverrides : map of raw upstream version -> canonical version, for upstreams whose tag numbering doesn't sort right (e.g. { "0.1.405-beta" = "0.1.40.5-beta"; }). The canonical form drives sorting/branch naming/the pin's version field; the raw form remains what update-version fetches.
 #   versionCanon     : list of `sed -E` expressions applied in order to each raw version to derive its canonical form, for a tag-numbering scheme too general to enumerate in versionOverrides (e.g. every 0.1.XXX-beta hotfix -> 0.1.XX.X-beta). A matching versionOverrides entry takes precedence over these rules.

@@ -80,6 +80,47 @@
           in
           pkgs.lib.throwIf (failures != [ ]) "versionMatchesComparison tests failed"
             (pkgs.runCommand "version-matches-comparison-tests" { } "touch $out");
+        update-branches-test-gh = pkgs.writeShellApplication {
+          name = "gh";
+          text = ''printf '%s\n' 1.0.1'';
+        };
+        update-branches-test-nix = pkgs.writeShellApplication {
+          name = "nix";
+          runtimeInputs = [ pkgs.gnugrep ];
+          text = ''
+            if [[ "''${1}" == "flake" ]]; then
+              exit 0
+            fi
+            [[ "''${1}" == "run" ]]
+            grep -Fq 'assets.fixture' "''${FLAKE_ROOT}/pin.nix"
+            while [[ "''${1}" != "--" ]]; do
+              shift
+            done
+            shift
+            TARGET_VERSION="''${1}"
+            printf '%s\n' \
+              '{' \
+              "  version = \"''${TARGET_VERSION}\";" \
+              '  assets.fixture = "updated-hash";' \
+              '}' > "''${FLAKE_ROOT}/pin.nix"
+          '';
+        };
+        update-branches-tests = pkgs.runCommand "update-branches-tests"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              pkgs.gnused
+              pkgs.jq
+              update-branches-test-gh
+              update-branches-test-nix
+            ];
+            UPDATE_BRANCHES_CORE = ./scripts/update-branches-core.sh;
+          } ''
+          bash ${./tests/test_update_branches.sh}
+          touch $out
+        '';
       in
       {
         packages = { inherit update-version update-branches update-version-pypi-cargo update-branches-pypi-cargo update-version-github update-version-github-pnpm update-version-github-commit update-version-huggingface update-branches-github-pnpm revalidate-hash; };
@@ -89,7 +130,7 @@
           npm-generated-hook = hookCheck "npm-generated-hook" npm-generated-hook;
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
           composed-hook = hookCheck "composed-hook" composed-hook;
-          inherit cascade-tests version-matches-comparison-tests;
+          inherit cascade-tests update-branches-tests version-matches-comparison-tests;
         };
       });
 }

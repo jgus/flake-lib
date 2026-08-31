@@ -60,7 +60,7 @@ source = {
 ```
 
 The update machinery and the orchestrator's per-flake bits
-(`list_upstream_versions`, `write_placeholder_pin`, and sibling cascades) are all driven from that spec.
+(`list_upstream_versions`, `prepare_new_branch_pin`, and sibling cascades) are all driven from that spec. `version-only` preserves the current complete pin while creating a branch so a bespoke updater can evaluate and atomically replace it with the target version's complete pin.
 
 PyPI producers resolve sibling requirements from their release metadata. Exact pins select exact branches, unbounded minimums select `main`, and bounded ranges select a compatible aggregate. PyPI prerelease branches remain available as exact history but do not advance aggregate branches unless `includePrereleaseAggregates` is enabled.
 
