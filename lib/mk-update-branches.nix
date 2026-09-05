@@ -17,6 +17,7 @@ pkgs.writeShellApplication {
     PYPI_FORMAT = source.format or "sdist";
     GH_OWNER = source.owner or "";
     GH_REPO = source.repo or "";
+    GH_TAG_PREFIXES = builtins.toJSON (if source ? tagPrefix then [ source.tagPrefix ] else [ "v" "V" "" ]);
     PIN_SCHEMA = pinSchema;
     BRANCH_OWNED_FILES = pkgs.lib.concatStringsSep " " branchOwnedFiles;
     EXTRA_HASHES = builtins.toJSON extraHashes;

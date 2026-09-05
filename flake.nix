@@ -105,6 +105,47 @@
               '}' > "''${FLAKE_ROOT}/pin.nix"
           '';
         };
+        update-version-test-gh = pkgs.writeShellApplication {
+          name = "gh";
+          text = ''
+            case "''${*}" in
+              *'/releases/latest'*) printf '%s\n' "''${TEST_RELEASE_TAG}" ;;
+              *'/tags'*) printf '%s\n' "''${TEST_TAGS}" ;;
+              *'/commits/'*) printf '%s\n' source-revision ;;
+              *) exit 1 ;;
+            esac
+          '';
+        };
+        update-version-test-nix = pkgs.writeShellApplication {
+          name = "nix";
+          text = ''
+            case "''${1}" in
+              eval) ;;
+              flake) printf '%s\n' '{}' > "''${FLAKE_ROOT}/flake.lock" ;;
+              *) exit 1 ;;
+            esac
+          '';
+        };
+        update-version-test-prefetch = pkgs.writeShellApplication {
+          name = "nix-prefetch-github";
+          text = ''printf '%s\n' '{"hash":"sha256-source"}' '';
+        };
+        update-version-tests = pkgs.runCommand "update-version-tests"
+          {
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.jq
+              update-version-test-gh
+              update-version-test-nix
+              update-version-test-prefetch
+            ];
+            UPDATE_VERSION = ./scripts/update-version.sh;
+          } ''
+            bash ${./tests/test_update_version.sh}
+            touch "''${out}"
+          '';
         update-branches-tests = pkgs.runCommand "update-branches-tests"
           {
             nativeBuildInputs = [
@@ -133,6 +174,7 @@
           yarn-hook = hookCheck "yarn-hook" yarn-hook;
           composed-hook = hookCheck "composed-hook" composed-hook;
           inherit cascade-tests update-branches-tests version-matches-comparison-tests;
+          inherit update-version-tests;
         };
       });
 }
