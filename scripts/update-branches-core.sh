@@ -27,6 +27,7 @@
 set -euo pipefail
 : "${MINIMUM_TRACKING_VERSION:?required env var}"
 MIN_VERSION_COMPONENTS="${MIN_VERSION_COMPONENTS:-3}"
+GH_TAG_PREFIX="${GH_TAG_PREFIX:-}"
 
 FLAKE_ROOT="${FLAKE_ROOT:-${PWD}}"
 cd "${FLAKE_ROOT}"
@@ -190,7 +191,12 @@ version_re="^[0-9]+(\.[0-9]+){$((MIN_VERSION_COMPONENTS - 1)),2}([-+a-zA-Z0-9.]+
 declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
-  v="${v#[Vv]}"
+  if [[ -n "${GH_TAG_PREFIX}" ]]; then
+    [[ "${v}" == "${GH_TAG_PREFIX}"* ]] || continue
+    v="${v#"${GH_TAG_PREFIX}"}"
+  else
+    v="${v#[Vv]}"
+  fi
   if [[ "${v}" =~ ${version_re} ]]; then
     canon=$(canonicalize_version "${v}")
     all_versions+=("${canon}")

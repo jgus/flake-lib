@@ -34,6 +34,7 @@ flake-lib.lib.warnIfNewerMajor { pkgs; name; lib ? pkgs.lib; }
 
 `source.type` is `pypi`, `github`, `github-release-asset`, `huggingface`, or `gitlab`. `github`
 hashes the source *tree* at a release tag (`{ version, sourceRev, sourceHash }`);
+GitHub sources whose release tags have an additional prefix set `tagPrefix`, such as `source = { type = "github"; owner = "openai"; repo = "codex"; tagPrefix = "rust-v"; };`. Pins and version branches use the version without that prefix.
 `github-release-asset` instead prefetches a single prebuilt release asset into a
 `{ version, hash }` pin (`pinSchema = "github-asset"`), for upstreams shipped as a
 ready-to-run binary/jar rather than built from source:

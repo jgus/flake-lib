@@ -45,12 +45,13 @@ point_aggregate() {
 }
 
 run_update() {
-  local VERSIONS="${1}"
+  local VERSIONS="${1}" TAG_PREFIX="${2:-}"
   (
     cd "${CHECKOUT}"
     BRANCH_OWNED_FILES=pin.nix \
     GH_OWNER=example \
     GH_REPO=example \
+    GH_TAG_PREFIX="${TAG_PREFIX}" \
     MINIMUM_TRACKING_VERSION=1.0.0 \
     MIN_VERSION_COMPONENTS=3 \
     PIN_SCHEMA=version-only \
@@ -107,6 +108,12 @@ point_aggregate v1.2 1.2.3-rc1
 point_aggregate v1 1.2.3-rc1
 point_aggregate main 1.2.3-rc1
 run_update $'1.2.3-rc1\n1.2.3'
+assert_same_ref v1.2 v1.2.3
+assert_same_ref v1 v1.2.3
+assert_same_ref main v1.2.3
+
+initialize_repository
+run_update $'v9.9.9\nrust-v1.2.3' rust-v
 assert_same_ref v1.2 v1.2.3
 assert_same_ref v1 v1.2.3
 assert_same_ref main v1.2.3
