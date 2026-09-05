@@ -27,7 +27,7 @@ pkgs.writeShellApplication {
     PYPI_FORMAT = source.format or "sdist";
     GH_OWNER = source.owner or "";
     GH_REPO = source.repo or "";
-    GH_TAG_PREFIX = source.tagPrefix or "";
+    GH_TAG_PREFIXES = builtins.toJSON (if source ? tagPrefix then [ source.tagPrefix ] else [ "v" "V" "" ]);
     GH_TRACK = source.track or "release"; # release (Releases API) | tag (latest version git tag) | commit (default-branch HEAD -> 0-unstable-DATE)
     GH_BRANCH = source.branch or ""; # commit-tracking: branch to follow (default: repo's default branch)
     GH_FETCH_SUBMODULES = if (source.fetchSubmodules or false) then "1" else ""; # hash the tree with submodules (src must set fetchSubmodules = true)

@@ -15,20 +15,30 @@ write_empty_pin() {
 }
 
 run_update() {
-  local TRACK="${1}"
+  local TRACK="${1}" TAG_PREFIXES="${2}" RELEASE_TAG="${3}" TAGS="${4}"
+  local REQUESTED="${5:-}" REQUESTED_REF="${6:-}"
+  local -a ARGS=()
+  if [[ -n "${REQUESTED}" ]]; then
+    ARGS+=("${REQUESTED}")
+  fi
+  if [[ -n "${REQUESTED_REF}" ]]; then
+    ARGS+=("${REQUESTED_REF}")
+  fi
   FLAKE_ROOT="${TEST_ROOT}" \
     SOURCE_TYPE=github \
     GH_OWNER=openai \
     GH_REPO=codex \
-    GH_TAG_PREFIX=rust-v \
+    GH_TAG_PREFIXES="${TAG_PREFIXES}" \
     GH_TRACK="${TRACK}" \
+    TEST_RELEASE_TAG="${RELEASE_TAG}" \
+    TEST_TAGS="${TAGS}" \
     BUILD_ATTR=codex \
     HASH_MODE=prefetch \
     EXTRA_HASHES='[]' \
     PIN_HASHES='[]' \
     VERIFICATION=evaluate \
     SIBLINGS='[]' \
-    bash "${UPDATE_VERSION}"
+    bash "${UPDATE_VERSION}" "${ARGS[@]}"
 }
 
 assert_pin() {
@@ -38,9 +48,21 @@ assert_pin() {
 }
 
 write_empty_pin
-run_update release
+run_update release '["rust-v"]' rust-v1.2.3 ''
 assert_pin
 
 write_empty_pin
-run_update tag
+run_update tag '["rust-v"]' '' $'v9.9.9\nrust-v1.2.3'
+assert_pin
+
+write_empty_pin
+run_update release '["v","V",""]' v1.2.3 ''
+assert_pin
+
+write_empty_pin
+run_update release '["rust-v"]' '' '' rust-v1.2.3
+assert_pin
+
+write_empty_pin
+run_update release '["rust-v"]' '' '' 1.2.3 1.2.3
 assert_pin

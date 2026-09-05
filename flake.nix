@@ -109,9 +109,9 @@
           name = "gh";
           text = ''
             case "''${*}" in
-              *'/releases/latest'*) printf '%s\n' rust-v1.2.3 ;;
-              *'/tags'*) printf '%s\n' '[{"name":"v9.9.9"},{"name":"rust-v1.2.3"}]' ;;
-              *'/commits/rust-v1.2.3'*) printf '%s\n' source-revision ;;
+              *'/releases/latest'*) printf '%s\n' "''${TEST_RELEASE_TAG}" ;;
+              *'/tags'*) printf '%s\n' "''${TEST_TAGS}" ;;
+              *'/commits/'*) printf '%s\n' source-revision ;;
               *) exit 1 ;;
             esac
           '';

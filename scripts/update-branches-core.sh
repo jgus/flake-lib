@@ -27,7 +27,8 @@
 set -euo pipefail
 : "${MINIMUM_TRACKING_VERSION:?required env var}"
 MIN_VERSION_COMPONENTS="${MIN_VERSION_COMPONENTS:-3}"
-GH_TAG_PREFIX="${GH_TAG_PREFIX:-}"
+GH_TAG_PREFIXES="${GH_TAG_PREFIXES:-[\"v\",\"V\",\"\"]}"
+mapfile -t GITHUB_TAG_PREFIXES < <(jq -r '.[]' <<<"${GH_TAG_PREFIXES}")
 
 FLAKE_ROOT="${FLAKE_ROOT:-${PWD}}"
 cd "${FLAKE_ROOT}"
@@ -172,6 +173,19 @@ canonicalize_version() {
   printf '%s' "${canon}"
 }
 
+github_version_from_tag() {
+  local TAG="${1}" PREFIX VERSION
+  for PREFIX in "${GITHUB_TAG_PREFIXES[@]}"; do
+    [[ "${TAG}" == "${PREFIX}"* ]] || continue
+    VERSION="${TAG#"${PREFIX}"}"
+    if [[ "${VERSION}" =~ ^[0-9] ]]; then
+      printf '%s\n' "${VERSION}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 # Define the `ours` merge driver so .gitattributes' `merge=ours` rules take effect: `true` exits 0 without touching the file, leaving the branch's version.
@@ -191,12 +205,7 @@ version_re="^[0-9]+(\.[0-9]+){$((MIN_VERSION_COMPONENTS - 1)),2}([-+a-zA-Z0-9.]+
 declare -a all_versions=()
 declare -A orig_of=()
 for v in "${raw_versions[@]}"; do
-  if [[ -n "${GH_TAG_PREFIX}" ]]; then
-    [[ "${v}" == "${GH_TAG_PREFIX}"* ]] || continue
-    v="${v#"${GH_TAG_PREFIX}"}"
-  else
-    v="${v#[Vv]}"
-  fi
+  v=$(github_version_from_tag "${v}" || true)
   if [[ "${v}" =~ ${version_re} ]]; then
     canon=$(canonicalize_version "${v}")
     all_versions+=("${canon}")

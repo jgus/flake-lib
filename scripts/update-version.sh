@@ -50,7 +50,7 @@ SIBLING_REFS_IN_PIN="${SIBLING_REFS_IN_PIN:-}"
 CASCADE_PY="${CASCADE_PY:-}"
 GH_TRACK="${GH_TRACK:-release}"
 GH_BRANCH="${GH_BRANCH:-}"
-GH_TAG_PREFIX="${GH_TAG_PREFIX:-}"
+GH_TAG_PREFIXES="${GH_TAG_PREFIXES:-[\"v\",\"V\",\"\"]}"
 GH_FETCH_SUBMODULES="${GH_FETCH_SUBMODULES:-}"  # non-empty: hash the tree with submodules
 GH_ASSET="${GH_ASSET:-}"
 GH_TAG="${GH_TAG:-}"
@@ -58,6 +58,7 @@ GITLAB_TRACK="${GITLAB_TRACK:-commit}"
 HF_REPO="${HF_REPO:-}"
 HF_REVISION="${HF_REVISION:-main}"
 HF_FILES="${HF_FILES:-[]}"
+mapfile -t GITHUB_TAG_PREFIXES < <(jq -r '.[]' <<<"${GH_TAG_PREFIXES}")
 
 declare -A extra=()
 declare -A HF_HASHES=()
@@ -147,15 +148,27 @@ fetch_repo_file() {
 }
 
 resolve_github_ref_sha() {
-  local REF_BASE="${1}" CANDIDATE SHA
+  local REF_BASE="${1}" PREFIX CANDIDATE SHA
   local -a CANDIDATES=()
-  if [[ -n "${GH_TAG_PREFIX}" && "${REF_BASE}" != "${GH_TAG_PREFIX}"* ]]; then
-    CANDIDATES+=("${GH_TAG_PREFIX}${REF_BASE}")
-  fi
-  CANDIDATES+=("v${REF_BASE}" "V${REF_BASE}" "${REF_BASE}")
+  for PREFIX in "${GITHUB_TAG_PREFIXES[@]}"; do
+    CANDIDATES+=("${PREFIX}${REF_BASE}")
+  done
   for CANDIDATE in "${CANDIDATES[@]}"; do
     if SHA=$(gh api "/repos/${GH_OWNER}/${GH_REPO}/commits/${CANDIDATE}" --jq '.sha' 2>/dev/null) && [[ -n "${SHA}" ]]; then
       echo "${SHA}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+github_version_from_tag() {
+  local TAG="${1}" PREFIX VERSION
+  for PREFIX in "${GITHUB_TAG_PREFIXES[@]}"; do
+    [[ "${TAG}" == "${PREFIX}"* ]] || continue
+    VERSION="${TAG#"${PREFIX}"}"
+    if [[ "${VERSION}" =~ ^[0-9] ]]; then
+      printf '%s\n' "${VERSION}"
       return 0
     fi
   done
@@ -425,37 +438,38 @@ case "${SOURCE_TYPE}" in
       new_version="0-unstable-$(jq -r '.commit.committer.date' <<<"${commit}" | cut -d'T' -f1)"
     else
       if [[ -n "${requested}" ]]; then
-        new_version="${requested}"
-        new_version="${new_version#"${GH_TAG_PREFIX}"}"
-        new_version="${new_version#[Vv]}"
+        if [[ "${requested}" =~ ^[0-9] ]]; then
+          new_version="${requested}"
+        else
+          new_version=$(github_version_from_tag "${requested}" || true)
+        fi
       elif [[ "${GH_TRACK}" == "tag" ]]; then
         echo "Querying GitHub for latest tag of ${GH_OWNER}/${GH_REPO}..."
-        if [[ -n "${GH_TAG_PREFIX}" ]]; then
-          new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" | jq -r --arg PREFIX "${GH_TAG_PREFIX}" '[.[].name | select(startswith($PREFIX))][0] // ""')
-          new_version="${new_version#"${GH_TAG_PREFIX}"}"
-        else
-          new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" --jq '[.[].name | select(test("^[vV]?[0-9]"))][0] // ""')
-          new_version="${new_version#[Vv]}"
-        fi
+        new_version=""
+        TAG_NAMES=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/tags" --jq '.[].name')
+        while IFS= read -r TAG; do
+          if new_version=$(github_version_from_tag "${TAG}"); then
+            break
+          fi
+        done <<<"${TAG_NAMES}"
         if [[ -z "${new_version}" ]]; then
           echo "error: could not determine a version tag for ${GH_OWNER}/${GH_REPO}" >&2
           exit 1
         fi
       else
         echo "Querying GitHub for latest release of ${GH_OWNER}/${GH_REPO}..."
-        new_version=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
-        if [[ -n "${GH_TAG_PREFIX}" && "${new_version}" != "${GH_TAG_PREFIX}"* ]]; then
-          echo "error: latest release tag ${new_version} does not start with configured prefix ${GH_TAG_PREFIX}" >&2
-          exit 1
-        fi
-        new_version="${new_version#"${GH_TAG_PREFIX}"}"
-        new_version="${new_version#[Vv]}"
+        RELEASE_TAG=$(retry gh api "/repos/${GH_OWNER}/${GH_REPO}/releases/latest" --jq '.tag_name')
+        new_version=$(github_version_from_tag "${RELEASE_TAG}" || true)
+      fi
+      if [[ -z "${new_version}" ]]; then
+        echo "error: ${requested:-${RELEASE_TAG:-release tags}} does not match a supported version prefix for ${GH_OWNER}/${GH_REPO}" >&2
+        exit 1
       fi
       ref_base="${requested_ref:-${new_version}}"
-      ref_base="${ref_base#[Vv]}"
+      ref_base=$(github_version_from_tag "${ref_base}" || printf '%s\n' "${ref_base}")
       new_rev=$(retry resolve_github_ref_sha "${ref_base}" || true)
       if [[ -z "${new_rev}" ]]; then
-        echo "error: could not resolve v${ref_base} / V${ref_base} / ${ref_base} on ${GH_OWNER}/${GH_REPO}" >&2
+        echo "error: could not resolve ${ref_base} with tag prefixes ${GH_TAG_PREFIXES} on ${GH_OWNER}/${GH_REPO}" >&2
         exit 1
       fi
     fi
