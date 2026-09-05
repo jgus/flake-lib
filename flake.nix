@@ -24,6 +24,7 @@
           source = exampleSource;
           buildAttr = "example";
           buildFailureHash = "cargoHash";
+          verification = "evaluate";
         };
         update-branches-pypi-cargo = lib.mkUpdateBranches {
           inherit pkgs;

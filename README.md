@@ -69,7 +69,7 @@ GitHub producers read sibling requirements from `reqFile = "requirements.txt"` b
 
 Set `siblingRefsInPin = true` to write the resolved refs under `pin.nix.dependencies` instead of rewriting `flake.nix`. The updater applies those refs while regenerating `flake.lock`, so each historical branch owns its complete source and dependency selection through `pin.nix` and `flake.lock` while `flake.nix` retains generic input URLs.
 
-Update verification evaluates the target package's derivation on every run. Set `verification = "build"` only when the producer must realize the package before publishing its pin. A non-null `buildFailureHash` selects build verification because the successful rebuild is part of deriving that pin.
+Update verification evaluates the target package's derivation on every run. Set `verification = "build"` only when the producer must realize the package before publishing its pin. A non-null `buildFailureHash` selects build verification by default; set `verification = "evaluate"` when hash discovery is sufficient and realizing the full package is prohibitively expensive for the updater.
 
 `buildFailureHash` names one additional pin field whose value is populated from
 the package build's fixed-output hash mismatch. This supports dependency fetchers
